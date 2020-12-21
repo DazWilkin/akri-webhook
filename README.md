@@ -13,32 +13,70 @@ References:
 openssl req -x509 -nodes -newkey rsa:4096 -keyout localhost.key -out localhost.crt -days 365 -subj "/CN=localhost"
 ```
 
+## Build
 
-Spec
-
-```YAML
-apiVersion: admissionregistration.k8s.io/v1
-kind: ValidatingWebhookConfiguration
-metadata:
-  name: akri-configuration-webhook
-  labels:
-    project: akri
-    component: validating-webhook
-    language: golang
-webhooks:
-- name: akri-configuration-webhook
-  clientConfig:
-    service:
-      name: akri-configuration-webhook
-      namespace: default
-      path: "/mutate"
-    caBundle: ${CA_BUNDLE}
-  rules:
-  - operations: ["CREATE", "UPDATE"]
-    apiGroups: [""]
-    apiVersions: ["v1"]
-    resources: ["pods"]
-  namespaceSelector:
-    matchLabels:
-      project: akri
+```bash
+docker build \
+--tag=ghcr.io/dazwilkin/akri-webhook:$(git rev-parse HEAD) \
+--file=./Dockerfile \
+.
 ```
+
+## Run (locally)
+
+```bash
+docker run \
+--rm --interactive --tty \
+--volume=${PWD}/secrets:/secrets \
+ghcr.io/dazwilkin/akri-webhook:8212d5d516920a8678f395358ec1a4852653c55e \
+  --tls-crt-file=/secrets/localhost.crt \
+  --tls-key-file=/secrets/localhost.key \
+  --port=8443
+```
+
+## Certificates
+
+```bash
+DIR="${PWD}/secrets"
+NAME="webhook"
+NAMESPACE="default"
+
+openssl req -nodes -new -x509 -keyout ${DIR}/ca.key -out ${DIR}/ca.crt -subj "/CN=Akri Webhook"
+openssl genrsa -out ${DIR}/${NAME}.key 2048
+
+
+openssl req -new -key ${DIR}/${NAME}.key -subj "/CN=${NAME}.${NAMESPACE}.svc" \
+| openssl x509 -req -CA ${DIR}/ca.crt -CAkey ${DIR}/ca.key -CAcreateserial -out ${DIR}/${NAME}.crt
+```
+
+Then:
+
+```bash
+CA_BUNDLE=$(cat ./secrets/ca.crt | openssl base64 -A)
+```
+
+Then:
+
+```bash
+kubectl create secret tls ${NAME} \
+--cert=${DIR}/${NAME}.crt \
+--key=${DIR}/${NAME}.key
+```
+
+
+## Deploy
+
+But:
+
+```bash
+sed "s|CABUNDLE|${CA_BUNDLE}|g" ./validatingwebhook.yaml \
+| kubectl apply --filename=-
+```
+
+Generating errors:
+
+```console
+error: error validating "STDIN": error validating data: [ValidationError(ValidatingWebhookConfiguration.webhooks[0]): missing required field "sideEffects" in io.k8s.api.admissionregistration.v1.ValidatingWebhook, ValidationError(ValidatingWebhookConfiguration.webhooks[0]): missing required field "admissionReviewVersions" in io.k8s.api.admissionregistration.v1.ValidatingWebhook]; if you choose to ignore these errors, turn validation off with --validate=false
+```
+
+See: https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.20/#validatingwebhook-v1-admissionregistration-k8s-io
