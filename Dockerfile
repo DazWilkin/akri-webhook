@@ -15,7 +15,7 @@ COPY main.go .
 RUN CGO_ENABLED=0 GOOS=linux \
     go build -a -installsuffix cgo \
     -o /bin/${PROJECT} \
-    ${MODULE}/cmd/client
+    ${MODULE}
 
 
 FROM gcr.io/distroless/base-debian10
