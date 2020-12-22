@@ -39,7 +39,7 @@ import (
 var (
 	crtFile = flag.String("tls-crt-file", "", "TLS certificate file")
 	keyFile = flag.String("tls-key-file", "", "TLS key file")
-	port    = flag.Int("port", 443, "Webhook Port")
+	port    = flag.Int("port", 0, "Webhook Port")
 )
 
 func toAdmissionResponse(err error) *v1beta1.AdmissionResponse {
@@ -148,7 +148,7 @@ func main() {
 	klog.InitFlags(nil)
 	flag.Parse()
 
-	klog.V(2).Infof("[main] Loading key-pair [%s.%s]", *crtFile, *keyFile)
+	klog.V(2).Infof("[main] Loading key-pair [%s, %s]", *crtFile, *keyFile)
 	cert, err := tls.LoadX509KeyPair(*crtFile, *keyFile)
 	if err != nil {
 		klog.Fatal(err)
