@@ -157,7 +157,7 @@ func main() {
 		Certificates: []tls.Certificate{cert},
 	}
 
-	http.HandleFunc("/admit-custom-resource", serve)
+	http.HandleFunc("/validate", serve)
 	addr := fmt.Sprintf(":%d", *port)
 	server := &http.Server{
 		Addr:      addr,
