@@ -2,7 +2,7 @@
 
 REGISTRY="ghcr.io"
 PREFIX="akri-webhook"
-REPO="dazwilkin/${PREFIX}"
+REPO="${REGISTRY}/dazwilkin/${PREFIX}"
 TAG=$(git rev-parse HEAD)
 
 IMAGE=${REPO}:${TAG}
