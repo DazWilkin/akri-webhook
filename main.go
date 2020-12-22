@@ -144,6 +144,8 @@ func admitCustomResource(rqst v1.AdmissionReview) *v1beta1.AdmissionResponse {
 	return &reviewResponse
 }
 func main() {
+	// Ensure klog flags (--logtostderr, -v) are enabled
+	klog.InitFlags(nil)
 	flag.Parse()
 
 	klog.V(2).Infof("[main] Loading key-pair [%s.%s]", *crtFile, *keyFile)
