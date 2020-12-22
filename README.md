@@ -34,19 +34,19 @@ ghcr.io/dazwilkin/akri-webhook:8212d5d516920a8678f395358ec1a4852653c55e \
   --port=8443
 ```
 
-## Certificates
+## Certificates #1 (Monday)
 
 ```bash
 DIR="${PWD}/secrets"
-NAME="webhook"
+SERVICE="webhook"
 NAMESPACE="default"
 
 openssl req -nodes -new -x509 -keyout ${DIR}/ca.key -out ${DIR}/ca.crt -subj "/CN=Akri Webhook"
-openssl genrsa -out ${DIR}/${NAME}.key 2048
+openssl genrsa -out ${DIR}/${SERVICE}.key 2048
 
 
-openssl req -new -key ${DIR}/${NAME}.key -subj "/CN=${NAME}.${NAMESPACE}.svc" \
-| openssl x509 -req -CA ${DIR}/ca.crt -CAkey ${DIR}/ca.key -CAcreateserial -out ${DIR}/${NAME}.crt
+openssl req -new -key ${DIR}/${SERVICE}.key -subj "/CN=${SERVICE}.${NAMESPACE}.svc" \
+| openssl x509 -req -CA ${DIR}/ca.crt -CAkey ${DIR}/ca.key -CAcreateserial -out ${DIR}/${SERVICE}.crt
 ```
 
 Then:
@@ -58,9 +58,65 @@ CA_BUNDLE=$(cat ./secrets/ca.crt | openssl base64 -A)
 Then:
 
 ```bash
-kubectl create secret tls ${NAME} \
---cert=${DIR}/${NAME}.crt \
---key=${DIR}/${NAME}.key
+kubectl create secret tls ${SERVICE} \
+--cert=${DIR}/${SERVICE}.crt \
+--key=${DIR}/${SERVICE}.key
+```
+
+## Certificates #2 (Tuesday)
+
+```bash
+DIR=${PWD}/secrets
+SERVICE="tuesday"
+NAMESPACE="default"
+
+FILENAME="${DIR}/${SERVICE}.${NAMESPACE}"
+
+openssl req -new -sha256 -newkey rsa:2048 -keyout ${FILENAME}.key -out ${FILENAME}.csr -nodes -subj "/CN=${SERVICE}.${NAMESPACE}"
+
+cat <<EOF | kubectl apply --filename -
+apiVersion: certificates.k8s.io/v1beta1
+kind: CertificateSigningRequest
+metadata:
+  name: ${SERVICE}.${NAMESPACE}
+spec:
+  request: $(cat ${FILENAME}.csr | base64 | tr -d '\n')
+  usages:
+  - digital signature
+  - key encipherment
+  - server auth
+EOF
+
+kubectl certificate approve ${SERVICE}.${NAMESPACE}
+
+kubectl get csr ${SERVICE}.${NAMESPACE} -o jsonpath='{.status.certificate}' \
+| base64 --decode > ${FILENAME}.crt
+
+kubectl create secret tls ${SERVICE} \
+--namespace=${NAMESPACE} \
+--cert=${FILENAME}.crt \
+--key=${FILENAME}.key
+
+# kubectl create secret generic ${SERVICE} \
+# --namespace=${NAMESPACE} \
+# --from-file=key.pem=${FILENAME}.key \
+# --from-file=crt.pem=${FILENAME}.crt
+
+cat ./webhook.yaml \
+| sed "s|SERVICE|${SERVICE}|g" \
+| sed "s|NAMESPACE|${NAMESPACE}|g" \
+| sed "s|CABUNDLE|$(cat ${FILENAME}.crt | base64 --wrap=0)|g" \
+| kubectl apply --filename=-
+```
+
+Yields:
+
+```bash
+ls -la secrets
+
+tuesday.default.crt
+tuesday.default.csr
+tuesday.default.key
 ```
 
 
@@ -69,14 +125,19 @@ kubectl create secret tls ${NAME} \
 But:
 
 ```bash
-sed "s|CABUNDLE|${CA_BUNDLE}|g" ./validatingwebhook.yaml \
+cat ./webhook.deployment.yaml \
+| sed "s|SERVICE|${SERVICE}|g" \
+| sed "s|NAMESPACE|${NAMESPACE}|g" \
+| kubectl apply --filename=-
+
+cat ./webhook.service.yaml \
+| sed "s|SERVICE|${SERVICE}|g" \
+| sed "s|NAMESPACE|${NAMESPACE}|g" \
+| kubectl apply --filename=-
+
+cat ./validatingwebhook.yaml \
+| sed "s|SERVICE|${SERVICE}|g" \
+| sed "s|NAMESPACE|${NAMESPACE}|g" \
+| sed "s|CABUNDLE|${CA_BUNDLE}|g" \
 | kubectl apply --filename=-
 ```
-
-Generating errors:
-
-```console
-error: error validating "STDIN": error validating data: [ValidationError(ValidatingWebhookConfiguration.webhooks[0]): missing required field "sideEffects" in io.k8s.api.admissionregistration.v1.ValidatingWebhook, ValidationError(ValidatingWebhookConfiguration.webhooks[0]): missing required field "admissionReviewVersions" in io.k8s.api.admissionregistration.v1.ValidatingWebhook]; if you choose to ignore these errors, turn validation off with --validate=false
-```
-
-See: https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.20/#validatingwebhook-v1-admissionregistration-k8s-io
