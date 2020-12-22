@@ -13,18 +13,25 @@ webhooks:
       service:
         name: SERVICE
         namespace: NAMESPACE
+        port: 443
         path: "/validate" # Matches `main.go#L160`
       caBundle: CABUNDLE
     rules:
-      - operations: ["CREATE", "UPDATE"]
-        apiGroups: ["akri.sh"]
-        apiVersions: ["v0"]
-        resources: ["configuration"]
+      - operations:
+          - "CREATE"
+          - "UPDATE"
+        apiGroups:
+          - "*"
+        apiVersions:
+          - "akri.sh"
+        resources:
+          - "*"
+        scope: "*"
     admissionReviewVersions:
       - v0
       - v1beta1
       - v1
-    namespaceSelector:
-      matchLabels:
-        project: akri
+    # namespaceSelector:
+    #   matchLabels:
+    #     project: akri
     sideEffects: None

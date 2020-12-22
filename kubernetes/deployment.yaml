@@ -23,7 +23,7 @@ spec:
         - name: ghcr
       containers:
         - name: webhook
-          image: ghcr.io/dazwilkin/akri-webhook@sha256:90f547bb6b3ce0502e0ab616f7261fd34d5cd733c7802a8d5ad3943c60f01dd9
+          image: ghcr.io/dazwilkin/akri-webhook@sha256:d4c880cf3d5f32c967d80494b80aadce6fe86f2965aa19cf43eafe18fd9791cd
           imagePullPolicy: Always
           args:
             - --tls-crt-file=/secrets/tls.crt
