@@ -1,24 +1,25 @@
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingWebhookConfiguration
 metadata:
-  name: akri-configuration-webhook
+  name: SERVICE
+  namespace: NAMESPACE
   labels:
     project: akri
     component: validating-webhook
     language: golang
 webhooks:
-  - name: webhook.svc
+  - name: SERVICE.NAMESPACE.svc
     clientConfig:
       service:
-        name: webhook
-        namespace: default
-        path: "/mutate"
+        name: SERVICE
+        namespace: NAMESPACE
+        path: "/validate" # Matches `main.go#L160`
       caBundle: CABUNDLE
     rules:
       - operations: ["CREATE", "UPDATE"]
         apiGroups: ["akri.sh"]
         apiVersions: ["v0"]
-        resources: [""]
+        resources: ["configuration"]
     admissionReviewVersions:
       - v0
       - v1beta1

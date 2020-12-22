@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: SERVICE
+  namespace: NAMESPACE
+  labels:
+    project: akri
+    component: validating-webhook
+    language: golang
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      project: akri
+      component: validating-webhook
+  template:
+    metadata:
+      labels:
+        project: akri
+        component: validating-webhook
+    spec:
+      imagePullSecrets:
+        - name: ghcr
+      containers:
+        - name: webhook
+          image: ghcr.io/dazwilkin/akri-webhook@sha256:90f547bb6b3ce0502e0ab616f7261fd34d5cd733c7802a8d5ad3943c60f01dd9
+          imagePullPolicy: Always
+          args:
+            - --tls-crt-file=/secrets/tls.crt
+            - --tls-key-file=/secrets/tls.key
+            - --port=8443
+            - --logtostderr
+            - -v=2
+          volumeMounts:
+            - name: secrets
+              mountPath: /secrets
+              readOnly: true
+      volumes:
+        - name: secrets
+          secret:
+            secretName: SERVICE
