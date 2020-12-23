@@ -5,11 +5,11 @@ metadata:
   namespace: NAMESPACE
   labels:
     project: akri
-    component: validating-webhook
+    component: webhook
 spec:
   selector:
     project: akri
-    component: validating-webhook
+    component: webhook
   ports:
     - name: http
       port: 443

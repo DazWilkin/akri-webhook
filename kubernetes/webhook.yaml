@@ -5,7 +5,7 @@ metadata:
   namespace: NAMESPACE
   labels:
     project: akri
-    component: validating-webhook
+    component: webhook
     language: golang
 webhooks:
   - name: SERVICE.NAMESPACE.svc
@@ -14,24 +14,19 @@ webhooks:
         name: SERVICE
         namespace: NAMESPACE
         port: 443
-        path: "/validate" # Matches `main.go#L160`
+        path: "/validate"
       caBundle: CABUNDLE
     rules:
       - operations:
-          - "CREATE"
-          - "UPDATE"
+          - "*"
         apiGroups:
-          - "*"
-        apiVersions:
           - "akri.sh"
+        apiVersions:
+          - "v0"
         resources:
-          - "*"
+          - "configurations"
+          - "instances"
         scope: "*"
     admissionReviewVersions:
-      - v0
       - v1beta1
-      - v1
-    # namespaceSelector:
-    #   matchLabels:
-    #     project: akri
     sideEffects: None

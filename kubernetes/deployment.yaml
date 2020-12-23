@@ -5,19 +5,19 @@ metadata:
   namespace: NAMESPACE
   labels:
     project: akri
-    component: validating-webhook
+    component: webhook
     language: golang
 spec:
   replicas: 1
   selector:
     matchLabels:
       project: akri
-      component: validating-webhook
+      component: webhook
   template:
     metadata:
       labels:
         project: akri
-        component: validating-webhook
+        component: webhook
     spec:
       imagePullSecrets:
         - name: ghcr
