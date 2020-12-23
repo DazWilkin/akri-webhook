@@ -79,7 +79,7 @@ func validate(w http.ResponseWriter, r *http.Request) {
 
 	decode := serializer.NewCodecFactory(sch).UniversalDeserializer().Decode
 
-	obj, gvk, err := decode(body, nil, &rqst)
+	_, _, err := decode(body, nil, &rqst)
 	if err != nil {
 		klog.Errorf("Unable to deserialize request body: %v", err)
 		w.WriteHeader(http.StatusBadRequest)
@@ -87,8 +87,16 @@ func validate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	klog.V(2).Infof("[serve] Request:\n%+v", rqst)
-	klog.V(2).Infof("[serve] Runtime Object:\n%+v", obj)
-	klog.V(2).Infof("[serve] Schema GroupVersionKind:\n%+v", gvk)
+
+	// See: https://github.com/kubernetes/apimachinery/issues/102
+	raw := rqst.Request.Object.Raw
+	if len(raw) != 0 {
+		configuration := &Configuration{}
+		if err := json.Unmarshal(raw, configuration); err != nil {
+			klog.Errorf("[serve] Unable to unmarshal akri.sh/v0/Configuration: %v", err)
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	}
 
 	if rqst.Request == nil {
 		klog.Error("[serve] Admission Review request is nil")
