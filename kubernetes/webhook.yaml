@@ -26,7 +26,6 @@ webhooks:
           - "v0"
         resources:
           - "configurations"
-          - "instances"
         scope: "*"
     admissionReviewVersions:
       - v1beta1
