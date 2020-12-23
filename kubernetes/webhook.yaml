@@ -18,7 +18,8 @@ webhooks:
       caBundle: CABUNDLE
     rules:
       - operations:
-          - "*"
+          - "CREATE"
+          - "UPDATE"
         apiGroups:
           - "akri.sh"
         apiVersions:
