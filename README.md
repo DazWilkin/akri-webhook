@@ -67,7 +67,7 @@ kubectl create secret tls ${SERVICE} \
 
 ```bash
 DIR=${PWD}/secrets
-SERVICE="tuesday"
+SERVICE="wednesday"
 NAMESPACE="default"
 
 FILENAME="${DIR}/${SERVICE}.${NAMESPACE}"
@@ -158,9 +158,15 @@ Yields:
 ```bash
 ls -la secrets
 
-tuesday.default.crt
-tuesday.default.csr
-tuesday.default.key
+${SERVICE}.${NAMESPACE}.crt
+${SERVICE}.${NAMESPACE}.csr
+${SERVICE}.${NAMESPACE}.key
+```
+
+And:
+
+```bash
+kubectl get validatingwebhookconfiguration/${SERVICE}
 ```
 
 
@@ -169,22 +175,36 @@ tuesday.default.key
 But:
 
 ```bash
+# Deploy Webhook
 cat ./webhook.deployment.yaml \
 | sed "s|SERVICE|${SERVICE}|g" \
 | sed "s|NAMESPACE|${NAMESPACE}|g" \
 | kubectl apply --filename=-
 
+# Expose Webhook (Deployment)
 cat ./webhook.service.yaml \
 | sed "s|SERVICE|${SERVICE}|g" \
 | sed "s|NAMESPACE|${NAMESPACE}|g" \
 | kubectl apply --filename=-
 
+# Configurae K8s to use the Webhook
 cat ./validatingwebhook.yaml \
 | sed "s|SERVICE|${SERVICE}|g" \
 | sed "s|NAMESPACE|${NAMESPACE}|g" \
 | sed "s|CABUNDLE|${CA_BUNDLE}|g" \
 | kubectl apply --filename=-
 ```
+
+## Verify
+
+```bash
+kubectl get deployment --selector=project=akri,component=webhook
+kubectl get pod --selector=project=akri,component=webhook
+kubectl get service --selector=project=akri,component=webhook
+```
+
+
+
 
 ## Deleting
 
@@ -216,32 +236,68 @@ kubectl delete validatingwebhookconfiguration/${SERVICE}
 
 ## Debugging
 
+Using Zeroconf, need some services published for the Akri Agent to find:
+
+```bash
+KIND="_rust._tcp"
+PORT="8888"
+TXT_RECORDS=("project=akri" "protocol=zeroconf" "component=avahi-publish")
+
+for SERVICE in "mars" "venus" "jupiter" "saturn" "neptune" "uranus"
+do
+  avahi-publish --service ${SERVICE} ${KIND} ${PORT} ${TXT_RECORDS[@]} & 
+done
+```
+
+Then:
+
 ```bash
 REPO="ghcr.io/dazwilkin"
 VERS="v0.0.44-amd64"
 
-sudo microk8s.helm3 install akri ./akri/deployment/helm --set imagePullSecrets[0].name=ghcr --set agent.image.repository=${REPO}/agent --set agent.image.tag=${VERS} --set controller.image.repository=${REPO}/controller --set controller.image.tag=${VERS}
+sudo microk8s.helm3 install akri ./akri/deployment/helm \
+--set imagePullSecrets[0].name=ghcr \
+--set agent.image.repository=${REPO}/agent \
+--set agent.image.tag=${VERS} \
+--set controller.image.repository=${REPO}/controller \
+--set controller.image.tag=${VERS}
 
 kubectl apply --filename=./zeroconf.yaml
+```
 
-kubectl run curl -it --rm --image=curlimages/curl -- sh
+Then `curl` Webhook's `/validate` endpoint:
+
+```bash
+kubectl run curl --stdin --tty --rm --image=curlimages/curl -- sh
 curl \
 --insecure \
 --request POST \
 --header "Content-Type: application/json:" \
-https://tuesday.default.svc/validate
+https://${SERVICE}.${NAMESPACE}.svc/validate
 ```
 
+Then check the deployment's logs:
+
+```bash
+kubectl logs  --selector=project=akri
+[serve] Entering
+[serve] Method: POST
+[serve] Handling request:
+[serve] Request: {TypeMeta:{Kind: APIVersion:} Request:nil Response:nil}
+[serve] Runtime Object: &AdmissionReview{Request:nil,Response:nil,}
+[serve] Schema GroupVersionKind: /, Kind=
+E1223 18:08:50.741224       1 main.go:96] Admission Review request is nil
+```
 
 And:
 
 ```console
 {"kind":"AdmissionReview","apiVersion":"admission.k8s.io/v1beta1","request":{"uid":"18956111-376b-4bce-8ffd-0819739d0383","kind":{"group":"coordination.k8s.io","version":"v1","kind":"Lease"},"resource":{"group":"coordination.k8s.io","version":"v1","resource":"leases"},"requestKind":{"group":"coordination.k8s.io","version":"v1","kind":"Lease"},"requestResource":{"group":"coordination.k8s.io","version":"v1","resource":"leases"},"name":"kube-controller-manager","namespace":"kube-system","operation":"UPDATE","userInfo":{"username":"system:kube-controller-manager","uid":"controller","groups":["system:authenticated"]},"object":{"kind":"Lease","apiVersion":"coordination.k8s.io/v1","metadata":{"name":"kube-controller-manager","namespace":"kube-system","selfLink":"/apis/coordination.k8s.io/v1/namespaces/kube-system/leases/kube-controller-manager","uid":"96ba640f-98a8-4d8b-b41a-b8f04bd61704","resourceVersion":"583224","creationTimestamp":"2020-10-26T17:03:33Z","managedFields":[{"manager":"kube-controller-manager","operation":"Update","apiVersion":"coordination.k8s.io/v1","time":"2020-12-11T22:07:59Z","fieldsType":"FieldsV1","fieldsV1":{"f:spec":{"f:acquireTime":{},"f:holderIdentity":{},"f:leaseDurationSeconds":{},"f:leaseTransitions":{},"f:renewTime":{}}}}]},"spec":{"holderIdentity":"akri_2aebdcf5-bf34-444f-b3dd-117873b0cdef","leaseDurationSeconds":15,"acquireTime":"2020-12-22T21:55:56.000000Z","renewTime":"2020-12-22T22:01:51.937572Z","leaseTransitions":54}},"oldObject":{"kind":"Lease","apiVersion":"coordination.k8s.io/v1","metadata":{"name":"kube-controller-manager","namespace":"kube-system","uid":"96ba640f-98a8-4d8b-b41a-b8f04bd61704","resourceVersion":"583224","creationTimestamp":"2020-10-26T17:03:33Z"},"spec":{"holderIdentity":"akri_2aebdcf5-bf34-444f-b3dd-117873b0cdef","leaseDurationSeconds":15,"acquireTime":"2020-12-22T21:55:56.000000Z","renewTime":"2020-12-22T22:01:49.892509Z","leaseTransitions":54}},"dryRun":false,"options":{"kind":"UpdateOptions","apiVersion":"meta.k8s.io/v1"}}}
-I1222 22:01:52.043073       1 main.go:91] [serve] Request:
+[serve] Request:
 {TypeMeta:{Kind:AdmissionReview APIVersion:admission.k8s.io/v1beta1} Request:&AdmissionRequest{UID:18956111-376b-4bce-8ffd-0819739d0383,Kind:coordination.k8s.io/v1, Kind=Lease,Resource:{coordination.k8s.io v1 leases},SubResource:,Name:kube-controller-manager,Namespace:kube-system,Operation:UPDATE,UserInfo:{system:kube-controller-manager controller [system:authenticated] map[]},Object:{[123 34 107 105 110 100 34 58 34 76 101 97 115 101 34 44 34 97 112 105 86 101 114 115 105 111 110 34 58 34 99 111 111 114 100 105 110 97 116 105 111 110 46 107 56 115 46 105 111 47 118 49 34 44 34 109 101 116 97 100 97 116 97 34 58 123 34 110 97 109 101 34 58 34 107 117 98 101 45 99 111 110 116 114 111 108 108 101 114 45 109 97 110 97 103 101 114 34 44 34 110 97 109 101 115 112 97 99 101 34 58 34 107 117 98 101 45 115 121 115 116 101 109 34 44 34 115 101 108 102 76 105 110 107 34 58 34 47 97 112 105 115 47 99 111 111 114 100 105 110 97 116 105 111 110 46 107 56 115 46 105 111 47 118 49 47 110 97 109 101 115 112 97 99 101 115 47 107 117 98 101 45 115 121 115 116 101 109 47 108 101 97 115 101 115 47 107 117 98 101 45 99 111 110 116 114 111 108 108 101 114 45 109 97 110 97 103 101 114 34 44 34 117 105 100 34 58 34 57 54 98 97 54 52 48 102 45 57 56 97 56 45 52 100 56 98 45 98 52 49 97 45 98 56 102 48 52 98 100 54 49 55 48 52 34 44 34 114 101 115 111 117 114 99 101 86 101 114 115 105 111 110 34 58 34 53 56 51 50 50 52 34 44 34 99 114 101 97 116 105 111 110 84 105 109 101 115 116 97 109 112 34 58 34 50 48 50 48 45 49 48 45 50 54 84 49 55 58 48 51 58 51 51 90 34 44 34 109 97 110 97 103 101 100 70 105 101 108 100 115 34 58 91 123 34 109 97 110 97 103 101 114 34 58 34 107 117 98 101 45 99 111 110 116 114 111 108 108 101 114 45 109 97 110 97 103 101 114 34 44 34 111 112 101 114 97 116 105 111 110 34 58 34 85 112 100 97 116 101 34 44 34 97 112 105 86 101 114 115 105 111 110 34 58 34 99 111 111 114 100 105 110 97 116 105 111 110 46 107 56 115 46 105 111 47 118 49 34 44 34 116 105 109 101 34 58 34 50 48 50 48 45 49 50 45 49 49 84 50 50 58 48 55 58 53 57 90 34 44 34 102 105 101 108 100 115 84 121 112 101 34 58 34 70 105 101 108 100 115 86 49 34 44 34 102 105 101 108 100 115 86 49 34 58 123 34 102 58 115 112 101 99 34 58 123 34 102 58 97 99 113 117 105 114 101 84 105 109 101 34 58 123 125 44 34 102 58 104 111 108 100 101 114 73 100 101 110 116 105 116 121 34 58 123 125 44 34 102 58 108 101 97 115 101 68 117 114 97 116 105 111 110 83 101 99 111 110 100 115 34 58 123 125 44 34 102 58 108 101 97 115 101 84 114 97 110 115 105 116 105 111 110 115 34 58 123 125 44 34 102 58 114 101 110 101 119 84 105 109 101 34 58 123 125 125 125 125 93 125 44 34 115 112 101 99 34 58 123 34 104 111 108 100 101 114 73 100 101 110 116 105 116 121 34 58 34 97 107 114 105 95 50 97 101 98 100 99 102 53 45 98 102 51 52 45 52 52 52 102 45 98 51 100 100 45 49 49 55 56 55 51 98 48 99 100 101 102 34 44 34 108 101 97 115 101 68 117 114 97 116 105 111 110 83 101 99 111 110 100 115 34 58 49 53 44 34 97 99 113 117 105 114 101 84 105 109 101 34 58 34 50 48 50 48 45 49 50 45 50 50 84 50 49 58 53 53 58 53 54 46 48 48 48 48 48 48 90 34 44 34 114 101 110 101 119 84 105 109 101 34 58 34 50 48 50 48 45 49 50 45 50 50 84 50 50 58 48 49 58 53 49 46 57 51 55 53 55 50 90 34 44 34 108 101 97 115 101 84 114 97 110 115 105 116 105 111 110 115 34 58 53 52 125 125] <nil>},OldObject:{[123 34 107 105 110 100 34 58 34 76 101 97 115 101 34 44 34 97 112 105 86 101 114 115 105 111 110 34 58 34 99 111 111 114 100 105 110 97 116 105 111 110 46 107 56 115 46 105 111 47 118 49 34 44 34 109 101 116 97 100 97 116 97 34 58 123 34 110 97 109 101 34 58 34 107 117 98 101 45 99 111 110 116 114 111 108 108 101 114 45 109 97 110 97 103 101 114 34 44 34 110 97 109 101 115 112 97 99 101 34 58 34 107 117 98 101 45 115 121 115 116 101 109 34 44 34 117 105 100 34 58 34 57 54 98 97 54 52 48 102 45 57 56 97 56 45 52 100 56 98 45 98 52 49 97 45 98 56 102 48 52 98 100 54 49 55 48 52 34 44 34 114 101 115 111 117 114 99 101 86 101 114 115 105 111 110 34 58 34 53 56 51 50 50 52 34 44 34 99 114 101 97 116 105 111 110 84 105 109 101 115 116 97 109 112 34 58 34 50 48 50 48 45 49 48 45 50 54 84 49 55 58 48 51 58 51 51 90 34 125 44 34 115 112 101 99 34 58 123 34 104 111 108 100 101 114 73 100 101 110 116 105 116 121 34 58 34 97 107 114 105 95 50 97 101 98 100 99 102 53 45 98 102 51 52 45 52 52 52 102 45 98 51 100 100 45 49 49 55 56 55 51 98 48 99 100 101 102 34 44 34 108 101 97 115 101 68 117 114 97 116 105 111 110 83 101 99 111 110 100 115 34 58 49 53 44 34 97 99 113 117 105 114 101 84 105 109 101 34 58 34 50 48 50 48 45 49 50 45 50 50 84 50 49 58 53 53 58 53 54 46 48 48 48 48 48 48 90 34 44 34 114 101 110 101 119 84 105 109 101 34 58 34 50 48 50 48 45 49 50 45 50 50 84 50 50 58 48 49 58 52 57 46 56 57 50 53 48 57 90 34 44 34 108 101 97 115 101 84 114 97 110 115 105 116 105 111 110 115 34 58 53 52 125 125] <nil>},DryRun:*false,Options:{[123 34 107 105 110 100 34 58 34 85 112 100 97 116 101 79 112 116 105 111 110 115 34 44 34 97 112 105 86 101 114 115 105 111 110 34 58 34 109 101 116 97 46 107 56 115 46 105 111 47 118 49 34 125] <nil>},RequestKind:coordination.k8s.io/v1, Kind=Lease,RequestResource:coordination.k8s.io/v1, Resource=leases,RequestSubResource:,} Response:nil}
-I1222 22:01:52.046508       1 main.go:92] [serve] Runtime Object:
+[serve] Runtime Object:
 &AdmissionReview{Request:&AdmissionRequest{UID:18956111-376b-4bce-8ffd-0819739d0383,Kind:coordination.k8s.io/v1, Kind=Lease,Resource:{coordination.k8s.io v1 leases},SubResource:,Name:kube-controller-manager,Namespace:kube-system,Operation:UPDATE,UserInfo:{system:kube-controller-manager controller [system:authenticated] map[]},Object:{[123 34 107 105 110 100 34 58 34 76 101 97 115 101 34 44 34 97 112 105 86 101 114 115 105 111 110 34 58 34 99 111 111 114 100 105 110 97 116 105 111 110 46 107 56 115 46 105 111 47 118 49 34 44 34 109 101 116 97 100 97 116 97 34 58 123 34 110 97 109 101 34 58 34 107 117 98 101 45 99 111 110 116 114 111 108 108 101 114 45 109 97 110 97 103 101 114 34 44 34 110 97 109 101 115 112 97 99 101 34 58 34 107 117 98 101 45 115 121 115 116 101 109 34 44 34 115 101 108 102 76 105 110 107 34 58 34 47 97 112 105 115 47 99 111 111 114 100 105 110 97 116 105 111 110 46 107 56 115 46 105 111 47 118 49 47 110 97 109 101 115 112 97 99 101 115 47 107 117 98 101 45 115 121 115 116 101 109 47 108 101 97 115 101 115 47 107 117 98 101 45 99 111 110 116 114 111 108 108 101 114 45 109 97 110 97 103 101 114 34 44 34 117 105 100 34 58 34 57 54 98 97 54 52 48 102 45 57 56 97 56 45 52 100 56 98 45 98 52 49 97 45 98 56 102 48 52 98 100 54 49 55 48 52 34 44 34 114 101 115 111 117 114 99 101 86 101 114 115 105 111 110 34 58 34 53 56 51 50 50 52 34 44 34 99 114 101 97 116 105 111 110 84 105 109 101 115 116 97 109 112 34 58 34 50 48 50 48 45 49 48 45 50 54 84 49 55 58 48 51 58 51 51 90 34 44 34 109 97 110 97 103 101 100 70 105 101 108 100 115 34 58 91 123 34 109 97 110 97 103 101 114 34 58 34 107 117 98 101 45 99 111 110 116 114 111 108 108 101 114 45 109 97 110 97 103 101 114 34 44 34 111 112 101 114 97 116 105 111 110 34 58 34 85 112 100 97 116 101 34 44 34 97 112 105 86 101 114 115 105 111 110 34 58 34 99 111 111 114 100 105 110 97 116 105 111 110 46 107 56 115 46 105 111 47 118 49 34 44 34 116 105 109 101 34 58 34 50 48 50 48 45 49 50 45 49 49 84 50 50 58 48 55 58 53 57 90 34 44 34 102 105 101 108 100 115 84 121 112 101 34 58 34 70 105 101 108 100 115 86 49 34 44 34 102 105 101 108 100 115 86 49 34 58 123 34 102 58 115 112 101 99 34 58 123 34 102 58 97 99 113 117 105 114 101 84 105 109 101 34 58 123 125 44 34 102 58 104 111 108 100 101 114 73 100 101 110 116 105 116 121 34 58 123 125 44 34 102 58 108 101 97 115 101 68 117 114 97 116 105 111 110 83 101 99 111 110 100 115 34 58 123 125 44 34 102 58 108 101 97 115 101 84 114 97 110 115 105 116 105 111 110 115 34 58 123 125 44 34 102 58 114 101 110 101 119 84 105 109 101 34 58 123 125 125 125 125 93 125 44 34 115 112 101 99 34 58 123 34 104 111 108 100 101 114 73 100 101 110 116 105 116 121 34 58 34 97 107 114 105 95 50 97 101 98 100 99 102 53 45 98 102 51 52 45 52 52 52 102 45 98 51 100 100 45 49 49 55 56 55 51 98 48 99 100 101 102 34 44 34 108 101 97 115 101 68 117 114 97 116 105 111 110 83 101 99 111 110 100 115 34 58 49 53 44 34 97 99 113 117 105 114 101 84 105 109 101 34 58 34 50 48 50 48 45 49 50 45 50 50 84 50 49 58 53 53 58 53 54 46 48 48 48 48 48 48 90 34 44 34 114 101 110 101 119 84 105 109 101 34 58 34 50 48 50 48 45 49 50 45 50 50 84 50 50 58 48 49 58 53 49 46 57 51 55 53 55 50 90 34 44 34 108 101 97 115 101 84 114 97 110 115 105 116 105 111 110 115 34 58 53 52 125 125] <nil>},OldObject:{[123 34 107 105 110 100 34 58 34 76 101 97 115 101 34 44 34 97 112 105 86 101 114 115 105 111 110 34 58 34 99 111 111 114 100 105 110 97 116 105 111 110 46 107 56 115 46 105 111 47 118 49 34 44 34 109 101 116 97 100 97 116 97 34 58 123 34 110 97 109 101 34 58 34 107 117 98 101 45 99 111 110 116 114 111 108 108 101 114 45 109 97 110 97 103 101 114 34 44 34 110 97 109 101 115 112 97 99 101 34 58 34 107 117 98 101 45 115 121 115 116 101 109 34 44 34 117 105 100 34 58 34 57 54 98 97 54 52 48 102 45 57 56 97 56 45 52 100 56 98 45 98 52 49 97 45 98 56 102 48 52 98 100 54 49 55 48 52 34 44 34 114 101 115 111 117 114 99 101 86 101 114 115 105 111 110 34 58 34 53 56 51 50 50 52 34 44 34 99 114 101 97 116 105 111 110 84 105 109 101 115 116 97 109 112 34 58 34 50 48 50 48 45 49 48 45 50 54 84 49 55 58 48 51 58 51 51 90 34 125 44 34 115 112 101 99 34 58 123 34 104 111 108 100 101 114 73 100 101 110 116 105 116 121 34 58 34 97 107 114 105 95 50 97 101 98 100 99 102 53 45 98 102 51 52 45 52 52 52 102 45 98 51 100 100 45 49 49 55 56 55 51 98 48 99 100 101 102 34 44 34 108 101 97 115 101 68 117 114 97 116 105 111 110 83 101 99 111 110 100 115 34 58 49 53 44 34 97 99 113 117 105 114 101 84 105 109 101 34 58 34 50 48 50 48 45 49 50 45 50 50 84 50 49 58 53 53 58 53 54 46 48 48 48 48 48 48 90 34 44 34 114 101 110 101 119 84 105 109 101 34 58 34 50 48 50 48 45 49 50 45 50 50 84 50 50 58 48 49 58 52 57 46 56 57 50 53 48 57 90 34 44 34 108 101 97 115 101 84 114 97 110 115 105 116 105 111 110 115 34 58 53 52 125 125] <nil>},DryRun:*false,Options:{[123 34 107 105 110 100 34 58 34 85 112 100 97 116 101 79 112 116 105 111 110 115 34 44 34 97 112 105 86 101 114 115 105 111 110 34 58 34 109 101 116 97 46 107 56 115 46 105 111 47 118 49 34 125] <nil>},RequestKind:coordination.k8s.io/v1, Kind=Lease,RequestResource:coordination.k8s.io/v1, Resource=leases,RequestSubResource:,},Response:nil,}
-I1222 22:01:52.048094       1 main.go:93] [serve] Schema GroupVersionKind:
+[serve] Schema GroupVersionKind:
 admission.k8s.io/v1beta1, Kind=AdmissionReview
-I1222 22:01:52.048532       1 main.go:104] [serve] Constructing response
+[serve] Constructing response
 ```
