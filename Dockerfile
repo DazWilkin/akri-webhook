@@ -10,7 +10,7 @@ ARG MODULE="github.com/deislabs/akri/${PROJECT}"
 COPY go.mod .
 RUN go mod download
 
-COPY main.go .
+COPY *.go ./
 
 RUN CGO_ENABLED=0 GOOS=linux \
     go build -a -installsuffix cgo \
