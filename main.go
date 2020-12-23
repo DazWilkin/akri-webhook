@@ -25,7 +25,6 @@ import (
 	"log"
 	"net/http"
 
-	v1 "k8s.io/api/admission/v1"
 	"k8s.io/api/admission/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -52,9 +51,8 @@ func toAdmissionResponse(err error) *v1beta1.AdmissionResponse {
 
 type admitFunc func(v1beta1.AdmissionReview) *v1beta1.AdmissionResponse
 
-func serve(w http.ResponseWriter, r *http.Request) {
+func validate(w http.ResponseWriter, r *http.Request) {
 	klog.V(2).Info("[serve] Entering")
-
 	klog.V(2).Infof("[serve] Method: %s", r.Method)
 
 	var body []byte
@@ -71,7 +69,7 @@ func serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	klog.V(2).Info(fmt.Sprintf("[serve] Handling request:\n%s", body))
+	klog.V(2).Info(fmt.Sprintf("[serve] Body:\n%s", body))
 
 	rqst := v1beta1.AdmissionReview{}
 
@@ -117,32 +115,6 @@ func serve(w http.ResponseWriter, r *http.Request) {
 	w.Write(bytes)
 }
 
-func admitCustomResource(rqst v1.AdmissionReview) *v1beta1.AdmissionResponse {
-	klog.V(2).Info("[admitCustomResource] Entering")
-	cr := struct {
-		metav1.ObjectMeta
-		Data map[string]string
-	}{}
-
-	raw := rqst.Request.Object.Raw
-	err := json.Unmarshal(raw, &cr)
-	if err != nil {
-		klog.Error(err)
-		return toAdmissionResponse(err)
-	}
-
-	reviewResponse := v1beta1.AdmissionResponse{}
-	reviewResponse.Allowed = true
-	for k, v := range cr.Data {
-		if k == "webhook-e2e-test" && v == "webhook-disallow" {
-			reviewResponse.Allowed = false
-			reviewResponse.Result = &metav1.Status{
-				Reason: "the custom resource contains unwanted data",
-			}
-		}
-	}
-	return &reviewResponse
-}
 func main() {
 	// Ensure klog flags (--logtostderr, -v) are enabled
 	klog.InitFlags(nil)
@@ -157,7 +129,7 @@ func main() {
 		Certificates: []tls.Certificate{cert},
 	}
 
-	http.HandleFunc("/validate", serve)
+	http.HandleFunc("/validate", validate)
 	addr := fmt.Sprintf(":%d", *port)
 	server := &http.Server{
 		Addr:      addr,
