@@ -93,7 +93,7 @@ func serve(w http.ResponseWriter, r *http.Request) {
 	klog.V(2).Infof("[serve] Schema GroupVersionKind:\n%+v", gvk)
 
 	if rqst.Request == nil {
-		klog.Error("Admission Review request is nil")
+		klog.Error("[serve] Admission Review request is nil")
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
