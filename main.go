@@ -29,6 +29,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog"
 
 	apiextv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
@@ -41,16 +42,72 @@ var (
 	port    = flag.Int("port", 0, "Webhook Port")
 )
 
-func toAdmissionResponse(err error) *v1beta1.AdmissionResponse {
-	return &v1beta1.AdmissionResponse{
-		Result: &metav1.Status{
-			Message: err.Error(),
-		},
+func invalidConfiguration(uid types.UID) func(message string) *v1beta1.AdmissionResponse {
+	return func(message string) *v1beta1.AdmissionResponse {
+		return &v1beta1.AdmissionResponse{
+			UID:     uid,
+			Allowed: false,
+			Result: &metav1.Status{
+				Message: message,
+			},
+		}
 	}
 }
+func validateConfiguration(rqst v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
+	invalid := invalidConfiguration(rqst.Request.UID)
 
-type admitFunc func(v1beta1.AdmissionReview) *v1beta1.AdmissionResponse
+	// See: https://github.com/kubernetes/apimachinery/issues/102
+	raw := rqst.Request.Object.Raw
 
+	if len(raw) == 0 {
+		klog.Error("[serve] AdmissionReview contains no data")
+		return invalid("AdmissionReview contains no data")
+	}
+
+	configuration := &Configuration{}
+
+	if err := json.Unmarshal(raw, configuration); err != nil {
+		klog.Errorf("[serve] Unable to unmarshal akri.sh/v0/Configuration: %v", err)
+		return invalid(err.Error())
+	}
+
+	// Check container resources [required]
+	if len(configuration.Spec.BrokerPodSpec.Containers) == 0 {
+		klog.Error("[serve] No containers in akri.sh/v0/Configuration")
+		return invalid("Configuration has no containers")
+	}
+	for _, c := range configuration.Spec.BrokerPodSpec.Containers {
+		r := c.Resources
+		klog.V(2).Infof("[serve] Container: %+v", r)
+		if len(r.Limits) == 0 {
+			klog.Errorf("[serve] Container [%s] has no `resources.limits` in akri.sh/v0/Configuration: %v", c.Name)
+			return invalid("Configuration does not include `resources.limits`")
+		}
+		for k := range r.Limits {
+			if k == "" {
+				klog.Errorf("[serve] Expect key in `spec.containers[\"%s\"].resources.limits`: %s", k)
+				return invalid(fmt.Sprintf("Expect key in `spec.containers[\"%s\"].resources.limits`: %s", c.Name, k))
+			}
+		}
+		if len(r.Requests) == 0 {
+			klog.Errorf("[serve] Container [%s] has no `resources.requests` in akri.sh/v0/Configuration: %v", c.Name)
+			return invalid("Configuration does not include `resources.requests`")
+		}
+		for k := range r.Requests {
+			if k == "" {
+				klog.Errorf("[serve] spec.containers[\"%s\"].resources.requests: %s", k)
+				return invalid(fmt.Sprintf("Expect key in `spec.containers[\"%s\"].resources.requests`: %s", c.Name, k))
+			}
+		}
+	}
+
+	// Otherwise, we're good!
+	return &v1beta1.AdmissionResponse{
+		UID:     rqst.Request.UID,
+		Allowed: true,
+	}
+
+}
 func validate(w http.ResponseWriter, r *http.Request) {
 	klog.V(2).Info("[serve] Entering")
 	klog.V(2).Infof("[serve] Method: %s", r.Method)
@@ -81,21 +138,9 @@ func validate(w http.ResponseWriter, r *http.Request) {
 
 	_, _, err := decode(body, nil, &rqst)
 	if err != nil {
-		klog.Errorf("Unable to deserialize request body: %v", err)
+		klog.Errorf("[serve] Unable to deserialize request body: %v", err)
 		w.WriteHeader(http.StatusBadRequest)
 		return
-	}
-
-	klog.V(2).Infof("[serve] Request:\n%+v", rqst)
-
-	// See: https://github.com/kubernetes/apimachinery/issues/102
-	raw := rqst.Request.Object.Raw
-	if len(raw) != 0 {
-		configuration := &Configuration{}
-		if err := json.Unmarshal(raw, configuration); err != nil {
-			klog.Errorf("[serve] Unable to unmarshal akri.sh/v0/Configuration: %v", err)
-			w.WriteHeader(http.StatusInternalServerError)
-		}
 	}
 
 	if rqst.Request == nil {
@@ -104,19 +149,16 @@ func validate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Valid Configuration?
-	allowed := true
+	klog.V(2).Infof("[serve] Request:\n%+v", rqst)
 
-	klog.V(2).Info("[serve] Constructing response")
-	resp := v1beta1.AdmissionReview{
-		Response: &v1beta1.AdmissionResponse{
-			UID:     rqst.Request.UID,
-			Allowed: allowed,
-		},
-	}
-	bytes, err := json.Marshal(&resp)
+	resp := validateConfiguration(rqst)
+	klog.V(2).Info("[serve] Response:\n+v", resp)
+
+	bytes, err := json.Marshal(&v1beta1.AdmissionReview{
+		Response: resp,
+	})
 	if err != nil {
-		klog.Errorf("Unable to marshal response: %v", err)
+		klog.Errorf("[serve] Unable to marshal response: %v", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
