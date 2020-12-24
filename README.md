@@ -9,105 +9,52 @@ References:
 + Kubernetes E2E tests [webhook](https://github.com/kubernetes/kubernetes/blob/v1.13.0/test/images/webhook/main.go)
 + Kubernetes API Reference [ValidatingWebhookConfiguration](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.20/#validatingwebhookconfiguration-v1-admissionregistration-k8s-io)
 
-```bash
-openssl req -x509 -nodes -newkey rsa:4096 -keyout localhost.key -out localhost.crt -days 365 -subj "/CN=localhost"
-```
-
 ## Build
 
 ```bash
+REPO="ghcr.io/dazwilkin/akri-webhook"
+TAGS=$(git rev-parse HEAD)
+
 docker build \
---tag=ghcr.io/dazwilkin/akri-webhook:$(git rev-parse HEAD) \
+--tag=${REPO}:${TAGS} \
 --file=./Dockerfile \
 .
 ```
 
-## Run (locally)
+## Local Testing
+
+### Certificate
 
 ```bash
+openssl req -x509 -nodes -newkey rsa:4096 -keyout localhost.key -out localhost.crt -days 365 -subj "/CN=localhost"
+```
+
+
+### Run
+
+```bash
+REPO="ghcr.io/dazwilkin/akri-webhook"
+TAGS=$(git rev-parse HEAD)
+
 docker run \
 --rm --interactive --tty \
 --volume=${PWD}/secrets:/secrets \
-ghcr.io/dazwilkin/akri-webhook:8212d5d516920a8678f395358ec1a4852653c55e \
+${REPO}:${TAGS} \
   --tls-crt-file=/secrets/localhost.crt \
   --tls-key-file=/secrets/localhost.key \
   --port=8443
 ```
 
-## Certificates #1 (Monday)
+## Kubernetes
 
-```bash
-DIR="${PWD}/secrets"
-SERVICE="webhook"
-NAMESPACE="default"
-
-openssl req -nodes -new -x509 -keyout ${DIR}/ca.key -out ${DIR}/ca.crt -subj "/CN=Akri Webhook"
-openssl genrsa -out ${DIR}/${SERVICE}.key 2048
-
-
-openssl req -new -key ${DIR}/${SERVICE}.key -subj "/CN=${SERVICE}.${NAMESPACE}.svc" \
-| openssl x509 -req -CA ${DIR}/ca.crt -CAkey ${DIR}/ca.key -CAcreateserial -out ${DIR}/${SERVICE}.crt
-```
-
-Then:
-
-```bash
-CA_BUNDLE=$(cat ./secrets/ca.crt | openssl base64 -A)
-```
-
-Then:
-
-```bash
-kubectl create secret tls ${SERVICE} \
---cert=${DIR}/${SERVICE}.crt \
---key=${DIR}/${SERVICE}.key
-```
-
-## Certificates #2 (Tuesday)
+### Certificate
 
 ```bash
 DIR=${PWD}/secrets
-SERVICE="wednesday"
+SERVICE="thursday"
 NAMESPACE="default"
 
 FILENAME="${DIR}/${SERVICE}.${NAMESPACE}"
-
-# echo "
-# [req]
-# req_extensions = v3_req
-# distinguished_name = req_distinguished_name
-# [req_distinguished_name]
-# [v3_req]
-# basicConstraints = CA:FALSE
-# keyUsage = nonRepudiation, digitalSignature, keyEncipherment
-# extendedKeyUsage = serverAuth
-# subjectAltName = @alt_names
-# [alt_names]
-# DNS.1 = ${SERVICE}
-# DNS.2 = ${SERVICE}.${NAMESPACE}
-# DNS.3 = ${SERVICE}.${NAMESPACE}.svc
-# " > ${FILENAME}.conf
-
-# openssl genrsa \
-# -out ${FILENAME}.key 2048
-
-# echo "
-# [req]
-# default_bits = 2048
-# prompt = no
-# default_md = sha256
-# req_extensions = req_ext
-# distinguished_name = dn
-# [dn]
-# O=.
-# CN=${SERVICE}.${NAMESPACE}.svc
-# [req_ext]
-# subjectAltName = @alt_names
-# [alt_names]
-# DNS.1 = ${SERVICE}
-# DNS.2 = ${SERVICE}.${NAMESPACE}
-# DNS.3 = ${SERVICE}.${NAMESPACE}.svc
-# " > ${FILENAME}.conf
 
 openssl req \
 -new \
@@ -116,9 +63,7 @@ openssl req \
 -keyout ${FILENAME}.key \
 -out ${FILENAME}.csr \
 -nodes \
--subj "/CN=${SERVICE}.${NAMESPACE}.svc" 
-# \
-# -config ${FILENAME}.conf
+-subj "/CN=${SERVICE}.${NAMESPACE}.svc"
 
 echo "
 apiVersion: certificates.k8s.io/v1beta1
@@ -145,12 +90,6 @@ kubectl create secret tls ${SERVICE} \
 --namespace=${NAMESPACE} \
 --cert=${FILENAME}.crt \
 --key=${FILENAME}.key
-
-cat ./webhook.yaml \
-| sed "s|SERVICE|${SERVICE}|g" \
-| sed "s|NAMESPACE|${NAMESPACE}|g" \
-| sed "s|CABUNDLE|$(cat ${FILENAME}.crt | base64 --wrap=0)|g" \
-| kubectl apply --filename=-
 ```
 
 Yields:
@@ -163,50 +102,67 @@ ${SERVICE}.${NAMESPACE}.csr
 ${SERVICE}.${NAMESPACE}.key
 ```
 
-And:
-
-```bash
-kubectl get validatingwebhookconfiguration/${SERVICE}
-```
-
-
-## Deploy
+### Deploy
 
 But:
 
 ```bash
 # Deploy Webhook
-cat ./webhook.deployment.yaml \
+cat ./kubernetes/deployment.yaml \
 | sed "s|SERVICE|${SERVICE}|g" \
 | sed "s|NAMESPACE|${NAMESPACE}|g" \
 | kubectl apply --filename=-
 
 # Expose Webhook (Deployment)
-cat ./webhook.service.yaml \
+cat ./kubernetes/service.yaml \
 | sed "s|SERVICE|${SERVICE}|g" \
 | sed "s|NAMESPACE|${NAMESPACE}|g" \
 | kubectl apply --filename=-
+
+
+CABUNDLE=$(\
+  kubectl get secrets \
+  --output=jsonpath="{.items[?(@.metadata.annotations['kubernetes\.io/service-account\.name']=='default')].data.ca\.crt}"\
+) && echo ${CABUNDLE}
 
 # Configurae K8s to use the Webhook
-cat ./validatingwebhook.yaml \
+cat ./kubernetes/webhook.yaml \
 | sed "s|SERVICE|${SERVICE}|g" \
 | sed "s|NAMESPACE|${NAMESPACE}|g" \
-| sed "s|CABUNDLE|${CA_BUNDLE}|g" \
+| sed "s|CABUNDLE|${CABUNDLE}|g" \
 | kubectl apply --filename=-
 ```
 
-## Verify
+### Verify
 
 ```bash
-kubectl get deployment --selector=project=akri,component=webhook
-kubectl get pod --selector=project=akri,component=webhook
-kubectl get service --selector=project=akri,component=webhook
+kubectl get deployment/${SERVICE}
+kubectl get service/${SERVICE}
+kubectl get validatingwebhookconfiguration/${SERVICE}
 ```
 
+And:
 
+```bash
+kubectl logs deployment/${SERVICE}
+```
 
+Should yield:
 
-## Deleting
+```console
+[main] Loading key-pair [/secrets/tls.crt, /secrets/tls.key]
+[main] Starting Server [:8443]
+```
+
+### Test
+
+In order to test the Webhook, we need to create an `akri.sh/v0/Configuration` (CRD). You can do this by deploying any Akri Configuration, perhaps:
+
+```bash
+kubectl apply --filename=./zeroconf.yaml
+```
+
+### Deleting
 
 ```bash
 cat ./webhook.deployment.yaml \
