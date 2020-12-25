@@ -203,7 +203,7 @@ func validate(w http.ResponseWriter, r *http.Request) {
 	klog.V(2).Infof("[serve] Request:\n%+v", rqst)
 
 	resp := validateConfiguration(rqst)
-	klog.V(2).Infof("[serve] Response:\n+v", resp)
+	klog.V(2).Infof("[serve] Response:\n%+v", resp)
 
 	bytes, err := json.Marshal(&v1beta1.AdmissionReview{
 		Response: resp,
