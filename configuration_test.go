@@ -1,11 +1,16 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"strings"
 	"testing"
+
+	"k8s.io/client-go/util/jsonpath"
 )
 
-var configuration = `
+// Example Configuration (Zeroconf)
+var good = `
 {
 	"apiVersion": "akri.sh/v0",
 	"kind": "Configuration",
@@ -88,13 +93,130 @@ var configuration = `
 }
 `
 
-func TestConfiguration(t *testing.T) {
-	got := &Configuration{}
-	if err := json.Unmarshal([]byte(configuration), &got); err != nil {
-		panic(err)
+// Possible to have multiple containers but (!?) only one with `{{PLACEHOLDER}}`
+var mult = `
+{
+	"apiVersion": "akri.sh/v0",
+	"kind": "Configuration",
+	"metadata": {
+		"generation": 1,
+		"name": "test"
+	},
+	"spec": {
+		"brokerPodSpec": {
+			"containers": [{
+				"image": "image",
+				"name": "name",
+				"resources": {
+					"limits": {
+						"{{PLACEHOLDER}}": "3"
+					}
+				}
+			}, {
+				"image": "sidecar-1",
+				"name": "name",
+				"resources": {
+					"requests": {
+						"cpu": "250m",
+						"memory": "64Mi"
+					},
+					"limits": {
+						"cpu": "500m",
+						"memory": "128Mi"
+					}
+				}
+			}, {
+				"image": "sidecar-2",
+				"name": "name",
+				"resources": {
+					"limits": {
+						"bar": "1"
+					}
+				}
+			}]
+		},
+		"capacity": 1,
+		"protocol": {
+			"zeroconf": {
+				"kind": "_rust._tcp",
+				"port": 8888,
+				"txtRecords": {
+					"component": "avahi-publish",
+					"project": "akri",
+					"protocol": "zeroconf"
+				}
+			}
+		}
 	}
-	want := &Configuration{}
-	if got != want {
-		t.Errorf("got: %v, want: %v", got, want)
+}
+`
+
+// My incorrect configuration
+var bad = `
+{
+	"apiVersion": "akri.sh/v0",
+	"kind": "Configuration",
+	"metadata": {
+	   "name": "zeroconf"
+	},
+	"spec": {
+	   "protocol": {
+		  "zeroconf": {
+			 "kind": "_rust._tcp",
+			 "port": 8888,
+			 "txtRecords": {
+				"project": "akri",
+				"protocol": "zeroconf",
+				"component": "avahi-publish"
+			 }
+		  }
+	   },
+	   "capacity": 1,
+	   "brokerPodSpec": {
+		  "imagePullSecrets": [
+			 {
+				"name": "ghcr"
+			 }
+		  ],
+		  "containers": [
+			 {
+				"name": "zeroconf-broker",
+				"image": "ghcr.io/dazwilkin/zeroconf-broker@sha256:993e5b8d...."
+			 }
+		  ],
+		  "resources": "<----------------------------- INCORRECTLY INDENTED AFTER EDIT\nlimits: \n  \"{{PLACEHOLDER}}\": \"1\""
+	   }
+	}
+ }
+`
+
+const template = "{.spec.brokerPodSpec.containers[*].resources.limits}"
+
+func TestUnmarshalConfiguration(t *testing.T) {
+	got := &Configuration{}
+	if err := json.Unmarshal([]byte(good), &got); err != nil {
+		t.Error(err)
+	}
+}
+func TestJSONPath(t *testing.T) {
+	var v interface{}
+	if err := json.Unmarshal([]byte(mult), &v); err != nil {
+		t.Error(err)
+	}
+
+	j := jsonpath.New("limits")
+	j.AllowMissingKeys(false)
+	if err := j.Parse(template); err != nil {
+		t.Error(err)
+	}
+
+	buf := new(bytes.Buffer)
+	if err := j.Execute(buf, v); err != nil {
+		t.Error(err)
+	}
+	got := buf.String()
+	want := "{{PLACEHOLDER}}"
+	if !strings.Contains(got, want) {
+		t.Errorf("[test] got: %s; want; %s", got, want)
 	}
 }
