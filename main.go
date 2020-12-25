@@ -89,14 +89,19 @@ func validateConfiguration(rqst v1beta1.AdmissionReview) *v1beta1.AdmissionRespo
 		return invalid(err.Error())
 	}
 
+	// TODO(dazwilkin) Can this be generalized to check multiple JSONPath templates?
 	// Want one (!) `container[*].resources.limits` to contain `{{PLACEHOLDER}}`
 	// May get multiple containers and these may contain `resources.limits`
-	allowed := strings.Contains(b.String(), "{{PLACEHOLDER}}")
+	key := "{{PLACEHOLDER}}"
+	if !strings.Contains(b.String(), key) {
+		klog.Errorf("[serve] Configuration does not include: `%s[%s]`", t, key)
+		return invalid(fmt.Sprintf("Configuration does not include `%s[%s]`", t, key))
+	}
 
 	// Otherwise, we're good!
 	return &v1beta1.AdmissionResponse{
 		UID:     rqst.Request.UID,
-		Allowed: allowed,
+		Allowed: true,
 	}
 
 }
