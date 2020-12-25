@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"bytes"
 	"crypto/tls"
 	"encoding/json"
 	"flag"
@@ -24,16 +25,17 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"strings"
 
 	"k8s.io/api/admission/v1beta1"
+	apiextv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/klog"
-
-	apiextv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/util/jsonpath"
+	"k8s.io/klog"
 )
 
 var (
@@ -53,6 +55,8 @@ func invalidConfiguration(uid types.UID) func(message string) *v1beta1.Admission
 		}
 	}
 }
+
+// New implementation: JSONPath-based
 func validateConfiguration(rqst v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
 	invalid := invalidConfiguration(rqst.Request.UID)
 
@@ -60,8 +64,53 @@ func validateConfiguration(rqst v1beta1.AdmissionReview) *v1beta1.AdmissionRespo
 	raw := rqst.Request.Object.Raw
 
 	if len(raw) == 0 {
-		klog.Error("[serve] AdmissionReview contains no data")
-		return invalid("AdmissionReview contains no data")
+		klog.Error("[serve] AdmissionReview Request Object contains no data")
+		return invalid("AdmissionReview Request Object contains no data")
+	}
+
+	var v interface{}
+	if err := json.Unmarshal(raw, &v); err != nil {
+		klog.Errorf("[serve] Unable to unmarshal akri.sh/v0/Configuration: %+v", err)
+		return invalid(err.Error())
+	}
+
+	j := jsonpath.New("limits")
+	t := "{.spec.brokerPodSpec.containers[*].resources.limits}"
+
+	j.AllowMissingKeys(true)
+	if err := j.Parse(t); err != nil {
+		klog.Errorf("[serve] Unable to parse JSONPath: %s", t)
+		return invalid(fmt.Sprintf("Unable to parse JSONPath: %s", t))
+	}
+
+	b := new(bytes.Buffer)
+	if err := j.Execute(b, v); err != nil {
+		klog.Errorf("[serve] Unable to apply JSONPath to Configuration: %+v", err)
+		return invalid(err.Error())
+	}
+
+	// Want one (!) `container[*].resources.limits` to contain `{{PLACEHOLDER}}`
+	// May get multiple containers and these may contain `resources.limits`
+	allowed := strings.Contains(b.String(), "{{PLACEHOLDER}}")
+
+	// Otherwise, we're good!
+	return &v1beta1.AdmissionResponse{
+		UID:     rqst.Request.UID,
+		Allowed: allowed,
+	}
+
+}
+
+// Previous implementation: code-based
+func _validateConfiguration(rqst v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
+	invalid := invalidConfiguration(rqst.Request.UID)
+
+	// See: https://github.com/kubernetes/apimachinery/issues/102
+	raw := rqst.Request.Object.Raw
+
+	if len(raw) == 0 {
+		klog.Error("[serve] AdmissionReview Request Object contains no data")
+		return invalid("AdmissionReview Request Object contains no data")
 	}
 
 	configuration := &Configuration{}
@@ -80,24 +129,21 @@ func validateConfiguration(rqst v1beta1.AdmissionReview) *v1beta1.AdmissionRespo
 		r := c.Resources
 		klog.V(2).Infof("[serve] Container: %+v", r)
 		if len(r.Limits) == 0 {
-			klog.Errorf("[serve] Container [%s] has no `resources.limits` in akri.sh/v0/Configuration: %v", c.Name)
+			klog.Errorf("[serve] Container [%s] has no `resources.limits` in akri.sh/v0/Configuration", c.Name)
 			return invalid("Configuration does not include `resources.limits`")
 		}
 		for k := range r.Limits {
 			if k == "" {
-				klog.Errorf("[serve] Expect key in `spec.containers[\"%s\"].resources.limits`: %s", k)
+				klog.Errorf("[serve] Expect key in `spec.containers[\"%s\"].resources.limits`: %s", c.Name, k)
 				return invalid(fmt.Sprintf("Expect key in `spec.containers[\"%s\"].resources.limits`: %s", c.Name, k))
 			}
 		}
-		if len(r.Requests) == 0 {
-			klog.Errorf("[serve] Container [%s] has no `resources.requests` in akri.sh/v0/Configuration: %v", c.Name)
-			return invalid("Configuration does not include `resources.requests`")
-		}
-		for k := range r.Requests {
-			if k == "" {
-				klog.Errorf("[serve] spec.containers[\"%s\"].resources.requests: %s", k)
-				return invalid(fmt.Sprintf("Expect key in `spec.containers[\"%s\"].resources.requests`: %s", c.Name, k))
-			}
+
+		// Alternative implementation using JSONPath
+		j := jsonpath.New("limits")
+		j.AllowMissingKeys(false)
+		if err := j.Parse(".spec.brokerPodSpec.containers[*].resources.limits"); err != nil {
+			klog.Infof("[serve] JSONPath error: %+v", err)
 		}
 	}
 
@@ -152,13 +198,13 @@ func validate(w http.ResponseWriter, r *http.Request) {
 	klog.V(2).Infof("[serve] Request:\n%+v", rqst)
 
 	resp := validateConfiguration(rqst)
-	klog.V(2).Info("[serve] Response:\n+v", resp)
+	klog.V(2).Infof("[serve] Response:\n+v", resp)
 
 	bytes, err := json.Marshal(&v1beta1.AdmissionReview{
 		Response: resp,
 	})
 	if err != nil {
-		klog.Errorf("[serve] Unable to marshal response: %v", err)
+		klog.Errorf("Unable to marshal response: %v", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
