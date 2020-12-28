@@ -111,39 +111,40 @@ But:
 cat ./kubernetes/deployment.yaml \
 | sed "s|SERVICE|${SERVICE}|g" \
 | sed "s|NAMESPACE|${NAMESPACE}|g" \
-| kubectl apply --filename=-
+| kubectl apply --filename=- --namespace=${NAMESPACE}
 
 # Expose Webhook (Deployment)
 cat ./kubernetes/service.yaml \
 | sed "s|SERVICE|${SERVICE}|g" \
 | sed "s|NAMESPACE|${NAMESPACE}|g" \
-| kubectl apply --filename=-
+| kubectl apply --filename=- --namespace=${NAMESPACE}
 
 CABUNDLE=$(\
   kubectl get secrets \
+  --namespace=${NAMESPACE} \
   --output=jsonpath="{.items[?(@.metadata.annotations['kubernetes\.io/service-account\.name']=='default')].data.ca\.crt}"\
 ) && echo ${CABUNDLE}
 
-# Configurae K8s to use the Webhook
+# Configure K8s to use the Webhook
 cat ./kubernetes/webhook.yaml \
 | sed "s|SERVICE|${SERVICE}|g" \
 | sed "s|NAMESPACE|${NAMESPACE}|g" \
 | sed "s|CABUNDLE|${CABUNDLE}|g" \
-| kubectl apply --filename=-
+| kubectl apply --filename=- --namespace=${NAMESPACE}
 ```
 
 ### Verify
 
 ```bash
-kubectl get deployment/${SERVICE}
-kubectl get service/${SERVICE}
-kubectl get validatingwebhookconfiguration/${SERVICE}
+kubectl get deployment/${SERVICE} --namespace=${NAMESPACE}
+kubectl get service/${SERVICE} --namespace=${NAMESPACE}
+kubectl get validatingwebhookconfiguration/${SERVICE} --namespace=${NAMESPACE}
 ```
 
 And:
 
 ```bash
-kubectl logs deployment/${SERVICE}
+kubectl logs deployment/${SERVICE} --namespace=${NAMESPACE}
 ```
 
 Should yield:
@@ -152,6 +153,8 @@ Should yield:
 [main] Loading key-pair [/secrets/tls.crt, /secrets/tls.key]
 [main] Starting Server [:8443]
 ```
+
+> **NOTE** The `Deployment` runs the webhook container on port `:8443` (shown above) but the `Service` maps this to `:443` and the `ValidatingWebhookConfiguration` is configured to use the `Service` on `:443`.
 
 ### Test
 
@@ -217,27 +220,38 @@ Configuration does not include `{.spec.brokerPodSpec.containers[*].resources.lim
 cat ./webhook.deployment.yaml \
 | sed "s|SERVICE|${SERVICE}|g" \
 | sed "s|NAMESPACE|${NAMESPACE}|g" \
-| kubectl delete --filename=-
+| kubectl delete --filename=- --namespace=${NAMESPACE}
 
 cat ./webhook.service.yaml \
 | sed "s|SERVICE|${SERVICE}|g" \
 | sed "s|NAMESPACE|${NAMESPACE}|g" \
-| kubectl delete --filename=-
+| kubectl delete --filename=- --namespace=${NAMESPACE}
 
 cat ./validatingwebhook.yaml \
 | sed "s|SERVICE|${SERVICE}|g" \
 | sed "s|NAMESPACE|${NAMESPACE}|g" \
 | sed "s|CABUNDLE|${CA_BUNDLE}|g" \
-| kubectl delete --filename=-
+| kubectl delete --filename=- --namespace=${NAMESPACE}
 ```
 
 Or, more succinctly:
 
 ```bash
-kubectl delete deployment/${SERVICE}
-kubectl delete service/${SERVICE}
-kubectl delete validatingwebhookconfiguration/${SERVICE}
+kubectl delete deployment/${SERVICE} \
+--namespace=${NAMESPACE}
+
+kubectl delete service/${SERVICE} \
+--namespace=${NAMESPACE}
+
+kubectl delete validatingwebhookconfiguration/${SERVICE} \
+--namespace=${NAMESPACE}
+
+kubectl delete secret/${SERVICE} \
+--namespace=${NAMESPACE}
 ```
+
+> **NOTE** You'll receive `warning: deleting cluster-scoped resources, not scoped to the provided namespace` because the `ValidatingWebhookConfiguration` although created in `${NAMESPACE}` applies to `akri.sh/v0/Configuration` created in any namespace.
+
 
 ## Debugging
 
