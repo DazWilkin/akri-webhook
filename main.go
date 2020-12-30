@@ -17,7 +17,6 @@ limitations under the License.
 package main
 
 import (
-	"bytes"
 	"crypto/tls"
 	"encoding/json"
 	"flag"
@@ -25,14 +24,12 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
-	"strings"
 
 	v1 "k8s.io/api/admission/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-	"k8s.io/client-go/util/jsonpath"
 	"k8s.io/klog"
 )
 
@@ -42,7 +39,43 @@ var (
 	port    = flag.Int("port", 0, "Webhook Port")
 )
 
-// New implementation: JSONPath-based
+func check(v interface{}, w interface{}) error {
+	log.Printf("check:\nv:\n%+v\nw:\n%+v", v, w)
+	if w == nil {
+		return fmt.Errorf("Input (%v) is not consistent with expected value", v)
+	}
+	switch v := v.(type) {
+	case []interface{}:
+		for i, v := range v {
+			err := check(v, w.([]interface{})[i])
+			if err != nil {
+				return fmt.Errorf("Input index (%v) is not parsed correctly: %v", i, err)
+			}
+		}
+	case map[string]interface{}:
+		for k, v := range v {
+			err := check(v, w.(map[string]interface{})[k])
+			if err != nil {
+				return fmt.Errorf("Input index (%v) is not parsed correctly: %v", k, err)
+			}
+		}
+	case map[interface{}]interface{}:
+		for k, v := range v {
+			err := check(v, w.(map[interface{}]interface{})[k])
+			if err != nil {
+				return fmt.Errorf("Input key (%v) is not parsed correctly: %v", k, err)
+			}
+		}
+	default:
+		if v != w {
+			return fmt.Errorf("Input (%v) is not consistent with parsed (%v)", v, w)
+		}
+		return nil
+	}
+
+	return nil
+}
+
 func validateConfiguration(rqst *v1.AdmissionRequest) *v1.AdmissionResponse {
 	resp := &v1.AdmissionResponse{
 		UID:     rqst.UID,
@@ -58,33 +91,34 @@ func validateConfiguration(rqst *v1.AdmissionRequest) *v1.AdmissionResponse {
 		return resp
 	}
 
+	// Untyped
 	var v interface{}
 	if err := json.Unmarshal(raw, &v); err != nil {
 		resp.Result.Message = err.Error()
 		return resp
 	}
 
-	j := jsonpath.New("limits")
-	t := "{.spec.brokerPodSpec.containers[*].resources.limits}"
-
-	j.AllowMissingKeys(true)
-	if err := j.Parse(t); err != nil {
-		resp.Result.Message = fmt.Sprintf("Unable to parse JSONPath: %s", t)
-		return resp
-	}
-
-	b := new(bytes.Buffer)
-	if err := j.Execute(b, v); err != nil {
+	// Typed (Configuration)
+	var c Configuration
+	if err := json.Unmarshal(raw, &c); err != nil {
 		resp.Result.Message = err.Error()
 		return resp
 	}
 
-	// TODO(dazwilkin) Can this be generalized to check multiple JSONPath templates?
-	// Want one (!) `container[*].resources.limits` to contain `{{PLACEHOLDER}}`
-	// May get multiple containers and these may contain `resources.limits`
-	key := "{{PLACEHOLDER}}"
-	if !strings.Contains(b.String(), key) {
-		resp.Result.Message = fmt.Sprintf("Configuration does not include `%s[%s]`", t, key)
+	reserialized, err := json.Marshal(c)
+	if err != nil {
+		resp.Result.Message = err.Error()
+		return resp
+	}
+
+	var w interface{}
+	if err := json.Unmarshal(reserialized, &w); err != nil {
+		resp.Result.Message = err.Error()
+		return resp
+	}
+
+	if err := check(v, w); err != nil {
+		resp.Result.Message = err.Error()
 		return resp
 	}
 
@@ -153,7 +187,7 @@ func validate(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	// Ensure klog flags (--logtostderr, -v) are enabled
+	// Ensure klog flags (--logtostderr, --v) are enabled
 	klog.InitFlags(nil)
 	flag.Parse()
 
