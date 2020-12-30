@@ -54,6 +54,8 @@ ${REPO}:${TAGS} \
 Then, from another shell:
 
 ```bash
+VERS="v1" # Version of `admissionregistration.k8s.io`
+
 for TEST in "good" "bad"
 do
   RESP=$(curl \
@@ -63,7 +65,7 @@ do
   --key ./secrets/localhost.key \
   --request POST \
   --header "Content-Type: application/json" \
-  --data "@./JSON/admissionreview.v1beta1.rqst.${TEST}.json" \
+  --data "@./JSON/admissionreview.${VERS}.rqst.${TEST}.json" \
   https://hades-canyon.local:8443/validate)
   printf "${TEST}: ${RESP}\n"
 done
