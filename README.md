@@ -54,22 +54,28 @@ ${REPO}:${TAGS} \
 Then, from another shell:
 
 ```bash
-curl \
---insecure \
---cert ./secrets/localhost.crt \
---key ./secrets/localhost.key \
---request POST \
---header "Content-Type: application/json" \
---data '@./admissionreview.json' \
-https://hades-canyon.local:8443/validate
+for TEST in "good" "bad"
+do
+  RESP=$(curl \
+  --silent \
+  --insecure \
+  --cert ./secrets/localhost.crt \
+  --key ./secrets/localhost.key \
+  --request POST \
+  --header "Content-Type: application/json" \
+  --data "@./JSON/admissionreview.v1beta1.rqst.${TEST}.json" \
+  https://hades-canyon.local:8443/validate)
+  printf "${TEST}: ${RESP}\n"
+done
 ```
 
-Optionally add `--write-out '%{response_code}'` but this will make the output non-JSON
+> **NOTE** you may add `--write-out '%{response_code}'` to check the response code
 
 Yields:
 
-```JSON
-{"response":{"uid":"2b752327-a529-4ffd-b2e2-478455e80a0d","allowed":true}}
+```console
+good: {"response":{"uid":"2b752327-a529-4ffd-b2e2-478455e80a0d","allowed":true,"status":{"metadata":{}}}}
+bad: {"response":{"uid":"2b752327-a529-4ffd-b2e2-478455e80a0d","allowed":false,"status":{"metadata":{},"message":"Configuration does not include `{.spec.brokerPodSpec.containers[*].resources.limits}[{{PLACEHOLDER}}]`"}}}
 ```
 
 ## Kubernetes

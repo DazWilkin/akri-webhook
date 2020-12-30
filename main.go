@@ -32,7 +32,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
-	"k8s.io/apimachinery/pkg/types"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/util/jsonpath"
 	"k8s.io/klog"
@@ -44,34 +43,26 @@ var (
 	port    = flag.Int("port", 0, "Webhook Port")
 )
 
-func invalidConfiguration(uid types.UID) func(message string) *v1beta1.AdmissionResponse {
-	return func(message string) *v1beta1.AdmissionResponse {
-		return &v1beta1.AdmissionResponse{
-			UID:     uid,
-			Allowed: false,
-			Result: &metav1.Status{
-				Message: message,
-			},
-		}
-	}
-}
-
 // New implementation: JSONPath-based
-func validateConfiguration(rqst v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
-	invalid := invalidConfiguration(rqst.Request.UID)
+func validateConfiguration(rqst *v1beta1.AdmissionRequest) *v1beta1.AdmissionResponse {
+	resp := &v1beta1.AdmissionResponse{
+		UID:     rqst.UID,
+		Allowed: false,
+		Result:  &metav1.Status{},
+	}
 
 	// See: https://github.com/kubernetes/apimachinery/issues/102
-	raw := rqst.Request.Object.Raw
+	raw := rqst.Object.Raw
 
 	if len(raw) == 0 {
-		klog.Error("[serve] AdmissionReview Request Object contains no data")
-		return invalid("AdmissionReview Request Object contains no data")
+		resp.Result.Message = "AdmissionReview Request Object contains no data"
+		return resp
 	}
 
 	var v interface{}
 	if err := json.Unmarshal(raw, &v); err != nil {
-		klog.Errorf("[serve] Unable to unmarshal akri.sh/v0/Configuration: %+v", err)
-		return invalid(err.Error())
+		resp.Result.Message = err.Error()
+		return resp
 	}
 
 	j := jsonpath.New("limits")
@@ -79,14 +70,14 @@ func validateConfiguration(rqst v1beta1.AdmissionReview) *v1beta1.AdmissionRespo
 
 	j.AllowMissingKeys(true)
 	if err := j.Parse(t); err != nil {
-		klog.Errorf("[serve] Unable to parse JSONPath: %s", t)
-		return invalid(fmt.Sprintf("Unable to parse JSONPath: %s", t))
+		resp.Result.Message = fmt.Sprintf("Unable to parse JSONPath: %s", t)
+		return resp
 	}
 
 	b := new(bytes.Buffer)
 	if err := j.Execute(b, v); err != nil {
-		klog.Errorf("[serve] Unable to apply JSONPath to Configuration: %+v", err)
-		return invalid(err.Error())
+		resp.Result.Message = err.Error()
+		return resp
 	}
 
 	// TODO(dazwilkin) Can this be generalized to check multiple JSONPath templates?
@@ -94,71 +85,16 @@ func validateConfiguration(rqst v1beta1.AdmissionReview) *v1beta1.AdmissionRespo
 	// May get multiple containers and these may contain `resources.limits`
 	key := "{{PLACEHOLDER}}"
 	if !strings.Contains(b.String(), key) {
-		klog.Errorf("[serve] Configuration does not include: `%s[%s]`", t, key)
-		return invalid(fmt.Sprintf("Configuration does not include `%s[%s]`", t, key))
+		resp.Result.Message = fmt.Sprintf("Configuration does not include `%s[%s]`", t, key)
+		return resp
 	}
 
 	// Otherwise, we're good!
-	return &v1beta1.AdmissionResponse{
-		UID:     rqst.Request.UID,
-		Allowed: true,
-	}
+	resp.Allowed = true
+	return resp
 
 }
 
-// Previous implementation: code-based
-func _validateConfiguration(rqst v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
-	invalid := invalidConfiguration(rqst.Request.UID)
-
-	// See: https://github.com/kubernetes/apimachinery/issues/102
-	raw := rqst.Request.Object.Raw
-
-	if len(raw) == 0 {
-		klog.Error("[serve] AdmissionReview Request Object contains no data")
-		return invalid("AdmissionReview Request Object contains no data")
-	}
-
-	configuration := &Configuration{}
-
-	if err := json.Unmarshal(raw, configuration); err != nil {
-		klog.Errorf("[serve] Unable to unmarshal akri.sh/v0/Configuration: %v", err)
-		return invalid(err.Error())
-	}
-
-	// Check container resources [required]
-	if len(configuration.Spec.BrokerPodSpec.Containers) == 0 {
-		klog.Error("[serve] No containers in akri.sh/v0/Configuration")
-		return invalid("Configuration has no containers")
-	}
-	for _, c := range configuration.Spec.BrokerPodSpec.Containers {
-		r := c.Resources
-		klog.V(2).Infof("[serve] Container: %+v", r)
-		if len(r.Limits) == 0 {
-			klog.Errorf("[serve] Container [%s] has no `resources.limits` in akri.sh/v0/Configuration", c.Name)
-			return invalid("Configuration does not include `resources.limits`")
-		}
-		for k := range r.Limits {
-			if k == "" {
-				klog.Errorf("[serve] Expect key in `spec.containers[\"%s\"].resources.limits`: %s", c.Name, k)
-				return invalid(fmt.Sprintf("Expect key in `spec.containers[\"%s\"].resources.limits`: %s", c.Name, k))
-			}
-		}
-
-		// Alternative implementation using JSONPath
-		j := jsonpath.New("limits")
-		j.AllowMissingKeys(false)
-		if err := j.Parse(".spec.brokerPodSpec.containers[*].resources.limits"); err != nil {
-			klog.Infof("[serve] JSONPath error: %+v", err)
-		}
-	}
-
-	// Otherwise, we're good!
-	return &v1beta1.AdmissionResponse{
-		UID:     rqst.Request.UID,
-		Allowed: true,
-	}
-
-}
 func validate(w http.ResponseWriter, r *http.Request) {
 	klog.V(2).Info("[serve] Entering")
 	klog.V(2).Infof("[serve] Method: %s", r.Method)
@@ -194,15 +130,16 @@ func validate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	klog.V(2).Infof("[serve] Request:\n%+v", rqst)
+
 	if rqst.Request == nil {
 		klog.Error("[serve] Admission Review request is nil")
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
-	klog.V(2).Infof("[serve] Request:\n%+v", rqst)
+	resp := validateConfiguration(rqst.Request)
 
-	resp := validateConfiguration(rqst)
 	klog.V(2).Infof("[serve] Response:\n%+v", resp)
 
 	bytes, err := json.Marshal(&v1beta1.AdmissionReview{
@@ -213,6 +150,7 @@ func validate(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
+
 	w.Write(bytes)
 }
 
