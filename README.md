@@ -26,9 +26,15 @@ docker build \
 ### Certificate
 
 ```bash
-openssl req -x509 -nodes -newkey rsa:4096 -keyout localhost.key -out localhost.crt -days 365 -subj "/CN=localhost"
+openssl req \
+-x509 \
+-newkey rsa:2048 \
+-keyout localhost.key \
+-out localhost.crt \
+-nodes \
+-days 365 \
+-subj "/CN=localhost"
 ```
-
 
 ### Run
 
@@ -43,6 +49,27 @@ ${REPO}:${TAGS} \
   --tls-crt-file=/secrets/localhost.crt \
   --tls-key-file=/secrets/localhost.key \
   --port=8443
+```
+
+Then, from another shell:
+
+```bash
+curl \
+--insecure \
+--cert ./secrets/localhost.crt \
+--key ./secrets/localhost.key \
+--request POST \
+--header "Content-Type: application/json" \
+--data '@./admissionreview.json' \
+https://hades-canyon.local:8443/validate
+```
+
+Optionally add `--write-out '%{response_code}'` but this will make the output non-JSON
+
+Yields:
+
+```JSON
+{"response":{"uid":"2b752327-a529-4ffd-b2e2-478455e80a0d","allowed":true}}
 ```
 
 ## Kubernetes
