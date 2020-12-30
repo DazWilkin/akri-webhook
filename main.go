@@ -27,8 +27,7 @@ import (
 	"net/http"
 	"strings"
 
-	"k8s.io/api/admission/v1beta1"
-	apiextv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
+	v1 "k8s.io/api/admission/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
@@ -44,8 +43,8 @@ var (
 )
 
 // New implementation: JSONPath-based
-func validateConfiguration(rqst *v1beta1.AdmissionRequest) *v1beta1.AdmissionResponse {
-	resp := &v1beta1.AdmissionResponse{
+func validateConfiguration(rqst *v1.AdmissionRequest) *v1.AdmissionResponse {
+	resp := &v1.AdmissionResponse{
 		UID:     rqst.UID,
 		Allowed: false,
 		Result:  &metav1.Status{},
@@ -115,11 +114,10 @@ func validate(w http.ResponseWriter, r *http.Request) {
 
 	klog.V(2).Info(fmt.Sprintf("[serve] Body:\n%s", body))
 
-	rqst := v1beta1.AdmissionReview{}
+	rqst := v1.AdmissionReview{}
 
 	sch := runtime.NewScheme()
 	_ = clientgoscheme.AddToScheme(sch)
-	_ = apiextv1beta1.AddToScheme(sch)
 
 	decode := serializer.NewCodecFactory(sch).UniversalDeserializer().Decode
 
@@ -142,7 +140,7 @@ func validate(w http.ResponseWriter, r *http.Request) {
 
 	klog.V(2).Infof("[serve] Response:\n%+v", resp)
 
-	bytes, err := json.Marshal(&v1beta1.AdmissionReview{
+	bytes, err := json.Marshal(&v1.AdmissionReview{
 		Response: resp,
 	})
 	if err != nil {
