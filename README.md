@@ -234,9 +234,9 @@ spec:
     containers:
       - name: zeroconf-broker
         image: ghcr.io/dazwilkin/zeroconf-broker@sha256:69810b622d37d0a9a544955d4d4c53f16fec6b8d32a111740f4503dcc164fcf0
-	resources: <------ INCORRECTLY INDENTED SO IT DOES NOT APPlY TO `containers`
-		limits:
-		"{{PLACEHOLDER}}": "1"
+  resources: <------ INCORRECTLY INDENTED SO IT DOES NOT APPlY TO `containers`
+    limits:
+      "{{PLACEHOLDER}}": "1"
 ```
 
 And apply it:
