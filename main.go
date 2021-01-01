@@ -22,7 +22,6 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net/http"
 
 	v1 "k8s.io/api/admission/v1"
@@ -40,7 +39,7 @@ var (
 )
 
 func check(v interface{}, deserialized interface{}) error {
-	log.Printf("check:\nv:\n%+v\nw:\n%+v", v, deserialized)
+	klog.V(2).Infof("check:\nv:\n%+v\nw:\n%+v", v, deserialized)
 	if deserialized == nil {
 		return fmt.Errorf("Input (%v) is not consistent with expected value", v)
 	}
@@ -183,6 +182,7 @@ func validate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	klog.V(2).Infof("[serve] Response:\n%+v", bytes)
 	w.Write(bytes)
 }
 
@@ -207,5 +207,5 @@ func main() {
 		TLSConfig: config,
 	}
 	klog.V(2).Infof("[main] Starting Server [%s]", addr)
-	log.Fatal(server.ListenAndServeTLS("", ""))
+	klog.Fatal(server.ListenAndServeTLS("", ""))
 }
