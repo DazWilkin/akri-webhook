@@ -39,36 +39,36 @@ var (
 	port    = flag.Int("port", 0, "Webhook Port")
 )
 
-func check(v interface{}, w interface{}) error {
-	log.Printf("check:\nv:\n%+v\nw:\n%+v", v, w)
-	if w == nil {
+func check(v interface{}, deserialized interface{}) error {
+	log.Printf("check:\nv:\n%+v\nw:\n%+v", v, deserialized)
+	if deserialized == nil {
 		return fmt.Errorf("Input (%v) is not consistent with expected value", v)
 	}
 	switch v := v.(type) {
 	case []interface{}:
 		for i, v := range v {
-			err := check(v, w.([]interface{})[i])
+			err := check(v, deserialized.([]interface{})[i])
 			if err != nil {
 				return fmt.Errorf("Input index (%v) is not parsed correctly: %v", i, err)
 			}
 		}
 	case map[string]interface{}:
 		for k, v := range v {
-			err := check(v, w.(map[string]interface{})[k])
+			err := check(v, deserialized.(map[string]interface{})[k])
 			if err != nil {
 				return fmt.Errorf("Input index (%v) is not parsed correctly: %v", k, err)
 			}
 		}
 	case map[interface{}]interface{}:
 		for k, v := range v {
-			err := check(v, w.(map[interface{}]interface{})[k])
+			err := check(v, deserialized.(map[interface{}]interface{})[k])
 			if err != nil {
 				return fmt.Errorf("Input key (%v) is not parsed correctly: %v", k, err)
 			}
 		}
 	default:
-		if v != w {
-			return fmt.Errorf("Input (%v) is not consistent with parsed (%v)", v, w)
+		if v != deserialized {
+			return fmt.Errorf("Input (%v) is not consistent with parsed (%v)", v, deserialized)
 		}
 		return nil
 	}
@@ -111,13 +111,13 @@ func validateConfiguration(rqst *v1.AdmissionRequest) *v1.AdmissionResponse {
 		return resp
 	}
 
-	var w interface{}
-	if err := json.Unmarshal(reserialized, &w); err != nil {
+	var deserialized interface{}
+	if err := json.Unmarshal(reserialized, &deserialized); err != nil {
 		resp.Result.Message = err.Error()
 		return resp
 	}
 
-	if err := check(v, w); err != nil {
+	if err := check(v, deserialized); err != nil {
 		resp.Result.Message = err.Error()
 		return resp
 	}
