@@ -39,7 +39,7 @@ var (
 )
 
 func check(v interface{}, deserialized interface{}) error {
-	klog.V(2).Infof("check:\nv:\n%+v\nw:\n%+v", v, deserialized)
+	// klog.V(2).Infof("check:\nv:\n%+v\nw:\n%+v", v, deserialized)
 	if deserialized == nil {
 		return fmt.Errorf("Input (%v) is not consistent with expected value", v)
 	}
@@ -174,6 +174,10 @@ func validate(w http.ResponseWriter, r *http.Request) {
 	klog.V(2).Infof("[serve] Response:\n%+v", resp)
 
 	bytes, err := json.Marshal(&v1.AdmissionReview{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "admission.k8s.io/v1",
+			Kind:       "AdmissionReview",
+		},
 		Response: resp,
 	})
 	if err != nil {
@@ -182,7 +186,7 @@ func validate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	klog.V(2).Infof("[serve] Response:\n%+v", bytes)
+	klog.V(2).Infof("[serve] Response:\n%+v", string(bytes))
 	w.Write(bytes)
 }
 
