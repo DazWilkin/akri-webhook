@@ -29,8 +29,8 @@ docker build \
 openssl req \
 -x509 \
 -newkey rsa:2048 \
--keyout localhost.key \
--out localhost.crt \
+-keyout ./secrets/localhost.key \
+-out ./secrets/localhost.crt \
 -nodes \
 -days 365 \
 -subj "/CN=localhost"
@@ -38,17 +38,30 @@ openssl req \
 
 ### Run
 
+Either:
+
+```bash
+go run . \
+--tls-crt-file=./secrets/localhost.crt \
+--tls-key-file=./secrets/localhost.key \
+--port=8443 \
+--logtostderr --v=2
+```
+
+
 ```bash
 REPO="ghcr.io/dazwilkin/akri-webhook"
 TAGS=$(git rev-parse HEAD)
 
 docker run \
 --rm --interactive --tty \
+--publish=8443:8443 \
 --volume=${PWD}/secrets:/secrets \
 ${REPO}:${TAGS} \
   --tls-crt-file=/secrets/localhost.crt \
   --tls-key-file=/secrets/localhost.key \
-  --port=8443
+  --port=8443 \
+  --logtostderr --v=2
 ```
 
 Then, from another shell:
