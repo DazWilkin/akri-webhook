@@ -298,8 +298,19 @@ kubectl delete secret/${SERVICE} \
 --namespace=${NAMESPACE}
 ```
 
+Or even more succintly if you used a non-default namespace:
+
+```bash
+kubectl delete namespace/${NAMESPACE}
+```
+
 > **NOTE** You'll receive `warning: deleting cluster-scoped resources, not scoped to the provided namespace` because the `ValidatingWebhookConfiguration` although created in `${NAMESPACE}` applies to `akri.sh/v0/Configuration` created in any namespace.
 
+You may also want to tidy any remaining CSRs if you're confident you won't need them:
+
+```bash
+kubectl delete csr/${SERVICE}.${NAMESPACE}
+```
 
 ## Debugging
 
