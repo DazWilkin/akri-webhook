@@ -104,6 +104,24 @@ NAMESPACE="default"
 
 FILENAME="${DIR}/${SERVICE}.${NAMESPACE}"
 
+echo "[ req ]
+default_bits = 2048
+prompt = no
+default_md = sha256
+distinguished_name = dn
+req_extensions = req_ext
+
+[ dn ]
+commonName = ${SERVICE}.${NAMESPACE}.svc
+
+[ req_ext ]
+subjectAltName = @alt_names
+
+[alt_names]
+DNS.1 = ${SERVICE}.${NAMESPACE}.svc
+DNS.2 = ${SERVICE}.${NAMESPACE}.svc.cluster.local
+" > ${FILENAME}.cfg
+
 openssl req \
 -new \
 -sha256 \
@@ -111,11 +129,11 @@ openssl req \
 -keyout ${FILENAME}.key \
 -out ${FILENAME}.csr \
 -nodes \
--subj "/CN=${SERVICE}.${NAMESPACE}.svc"
+-config ${FILENAME}.cfg
 
-# Use `certificates.k8s.io/v1beta` if Kubernetes <v1.19
+# See [Issue #5](https://github.com/DazWilkin/akri-webhook/issues/5)
 echo "
-apiVersion: certificates.k8s.io/v1
+apiVersion: certificates.k8s.io/v1beta1
 kind: CertificateSigningRequest
 metadata:
   name: ${SERVICE}.${NAMESPACE}
