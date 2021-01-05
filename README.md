@@ -113,8 +113,9 @@ openssl req \
 -nodes \
 -subj "/CN=${SERVICE}.${NAMESPACE}.svc"
 
+# Use `certificates.k8s.io/v1beta` if Kubernetes <v1.19
 echo "
-apiVersion: certificates.k8s.io/v1beta1
+apiVersion: certificates.k8s.io/v1
 kind: CertificateSigningRequest
 metadata:
   name: ${SERVICE}.${NAMESPACE}
