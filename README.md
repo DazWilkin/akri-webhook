@@ -287,6 +287,10 @@ cat ./kubernetes/deployment.yaml \
 | sed "s|SERVICE|${SERVICE}|g" \
 | sed "s|NAMESPACE|${NAMESPACE}|g" \
 | kubectl apply --filename=- --namespace=${NAMESPACE}
+
+# Verify
+openssl req -noout -text -in ${FILENAME}.csr | grep DNS
+openssl verify -CAfile ${FILENAME}.ca.crt ${FILENAME}.crt
 ```
 
 ### Verify
