@@ -95,7 +95,7 @@ bad: {"response":{"uid":"2b752327-a529-4ffd-b2e2-478455e80a0d","allowed":false,"
 
 ## Kubernetes
 
-### Certificate
+### `v1beta1` Certificate
 
 ```bash
 DIR=${PWD}/secrets
@@ -159,17 +159,7 @@ kubectl create secret tls ${SERVICE} \
 --key=${FILENAME}.key
 ```
 
-Yields:
-
-```bash
-ls -la secrets
-
-${SERVICE}.${NAMESPACE}.crt
-${SERVICE}.${NAMESPACE}.csr
-${SERVICE}.${NAMESPACE}.key
-```
-
-### Deploy
+#### Deploy
 
 But:
 
@@ -197,6 +187,101 @@ cat ./kubernetes/webhook.yaml \
 | sed "s|SERVICE|${SERVICE}|g" \
 | sed "s|NAMESPACE|${NAMESPACE}|g" \
 | sed "s|CABUNDLE|${CABUNDLE}|g" \
+| kubectl apply --filename=- --namespace=${NAMESPACE}
+```
+
+### `v1` Certificate
+
+This step is a consequence of the deprecation of `certificates.k8s.io/v1` in Kubernetes 1.19+ but it does not use `certificates.k8s.io/v1` because I could not get this to work (see: Stackoverflow [#65587904](https://stackoverflow.com/questions/65587904/condition-failed-attempting-to-approve-csrs-with-certificates-k8s-io-v1/65618344#65618344)).
+
+```bash
+DIR=${PWD}/secrets
+SERVICE="..."
+NAMESPACE="..."
+
+FILENAME="${DIR}/${SERVICE}.${NAMESPACE}"
+
+# Create CA
+openssl req \
+-nodes \
+-new \
+-x509 \
+-keyout ${FILENAME}.ca.key \
+-out ${FILENAME}.ca.crt \
+-subj "/CN=Validating Webhook CA"
+
+# Deploy (Webhook) Service to capture its IP
+cat ./kubernetes/service.yaml \
+| sed "s|SERVICE|${SERVICE}|g" \
+| sed "s|NAMESPACE|${NAMESPACE}|g" \
+| kubectl apply --filename=- --namespace=${NAMESPACE}
+
+ENDPOINT=$(\
+  kubectl get service/${SERVICE} \
+  --namespace=${NAMESPACE} \
+  --output=jsonpath="{.spec.clusterIP}") && echo ${ENDPOINT}
+
+# Create CSR
+echo "[ req ]
+default_bits = 2048
+prompt = no
+default_md = sha256
+distinguished_name = dn
+req_extensions = req_ext
+
+[ dn ]
+commonName = ${ENDPOINT}
+
+[ req_ext ]
+subjectAltName = @alt_names
+
+[alt_names]
+DNS.1 = ${SERVICE}.${NAMESPACE}.svc
+DNS.2 = ${SERVICE}.${NAMESPACE}.svc.cluster.local
+" > ${FILENAME}.cfg
+
+openssl req \
+-nodes \
+-new \
+-sha256 \
+-newkey rsa:2048 \
+-keyout ${FILENAME}.key \
+-out ${FILENAME}.csr \
+-config ${FILENAME}.cfg
+
+# Create CSR Extension
+printf "subjectAltName=DNS:${SERVICE}.${NAMESPACE}.svc,DNS:${SERVICE}.${NAMESPACE}.svc.cluster.local" > ${FILENAME}.ext
+
+# Create (Webhook) service certificate
+openssl x509 \
+-req \
+-in ${FILENAME}.csr \
+-extfile ${FILENAME}.ext \
+-CA ${FILENAME}.ca.crt \
+-CAkey ${FILENAME}.ca.key \
+-CAcreateserial \
+-out ${FILENAME}.crt
+
+# Create (Webhook) Deployment
+kubectl create secret tls ${SERVICE} \
+--namespace=${NAMESPACE} \
+--cert=${FILENAME}.crt \
+--key=${FILENAME}.key
+
+cat ./kubernetes/deployment.yaml \
+| sed "s|SERVICE|${SERVICE}|g" \
+| sed "s|NAMESPACE|${NAMESPACE}|g" \
+| kubectl apply --filename=- --namespace=${NAMESPACE}
+
+# Create Webhook
+kubectl create secret tls ${SERVICE} \
+--namespace=${NAMESPACE} \
+--cert=${FILENAME}.crt \
+--key=${FILENAME}.key
+
+cat ./kubernetes/deployment.yaml \
+| sed "s|SERVICE|${SERVICE}|g" \
+| sed "s|NAMESPACE|${NAMESPACE}|g" \
 | kubectl apply --filename=- --namespace=${NAMESPACE}
 ```
 
