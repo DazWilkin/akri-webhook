@@ -194,6 +194,10 @@ cat ./kubernetes/webhook.yaml \
 
 This step is a consequence of the deprecation of `certificates.k8s.io/v1` in Kubernetes 1.19+ but it does not use `certificates.k8s.io/v1` because I could not get this to work (see: Stackoverflow [#65587904](https://stackoverflow.com/questions/65587904/condition-failed-attempting-to-approve-csrs-with-certificates-k8s-io-v1/65618344#65618344)).
 
+This [post](https://dev.to/techschoolguru/how-to-create-sign-ssl-tls-certificates-2aai) was helpful to understand `openssl` self-signing of certificates.
+
+This StackRox [Admission Controller Webhook Demo](https://github.com/stackrox/admission-controller-webhook-demo) was useful in convincing me I didn't need to use Kubernetes to sign the Webhook's certificate.
+
 ```bash
 DIR=${PWD}/secrets
 SERVICE="..."
