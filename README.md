@@ -212,7 +212,7 @@ openssl req \
 -x509 \
 -keyout ${FILENAME}.ca.key \
 -out ${FILENAME}.ca.crt \
--subj "/CN=Validating Webhook CA"
+-subj "/CN=CA"
 
 # Deploy (Webhook) Service to capture its IP
 cat ./kubernetes/service.yaml \
@@ -277,15 +277,13 @@ cat ./kubernetes/deployment.yaml \
 | sed "s|NAMESPACE|${NAMESPACE}|g" \
 | kubectl apply --filename=- --namespace=${NAMESPACE}
 
-# Create Webhook
-kubectl create secret tls ${SERVICE} \
---namespace=${NAMESPACE} \
---cert=${FILENAME}.crt \
---key=${FILENAME}.key
+# Configure K8s to use the Webhook
+CABUNDLE=$(openssl base64 -A <"${FILENAME}.ca.crt")
 
-cat ./kubernetes/deployment.yaml \
+cat ./kubernetes/webhook.yaml \
 | sed "s|SERVICE|${SERVICE}|g" \
 | sed "s|NAMESPACE|${NAMESPACE}|g" \
+| sed "s|CABUNDLE|${CABUNDLE}|g" \
 | kubectl apply --filename=- --namespace=${NAMESPACE}
 
 # Verify
