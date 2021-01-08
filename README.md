@@ -95,6 +95,134 @@ bad: {"response":{"uid":"2b752327-a529-4ffd-b2e2-478455e80a0d","allowed":false,"
 
 ## Kubernetes
 
+### Recommended: [cert-manager](https://cert-manager.io)
+
+```bash
+DIR=${PWD}/secrets
+SERVICE="thursday"
+NAMESPACE="default"
+
+FILENAME="${DIR}/${SERVICE}.${NAMESPACE}"
+```
+
+> **Optional**: Create CA Issuer
+>
+> ```bash
+> # Generate CA
+> openssl req \
+> -nodes \
+> -new \
+> -x509 \
+> -keyout ${FILENAME}.ca.key \
+> -out ${FILENAME}.ca.crt \
+> "/CN=CA"
+>
+> # Create Secret
+> kubectl create secret tls ca \
+> --namespace=${NAMESPACE} \
+> --cert=${FILENAME}.ca.crt \
+> --key=${FILENAME}.ca.key
+>
+> # Deploy Issuer using this Secret
+> echo "
+> apiVersion: cert-manager.io/v1
+> kind: Issuer
+> metadata:
+>   name: ca
+>   namespace: ${NAMESPACE}
+> spec:
+>   ca:
+>     secretName: ca
+> " | kubectl apply --filename=-
+> ```
+
+> **NOTE** If you didn't create the CA in the previous step, you will need to adjust the `Issuer` to reflect your preferred issuer.
+
+```bash
+# Deploy (Webhook) Service to capture its IP
+cat ./kubernetes/service.yaml \
+| sed "s|SERVICE|${SERVICE}|g" \
+| sed "s|NAMESPACE|${NAMESPACE}|g" \
+| kubectl apply --filename=- --namespace=${NAMESPACE}
+
+ENDPOINT=$(\
+  kubectl get service/${SERVICE} \
+  --namespace=${NAMESPACE} \
+  --output=jsonpath="{.spec.clusterIP}") && echo ${ENDPOINT}
+
+# Create Service Certificate using CA Issuer
+echo "
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: ${SERVICE}
+  namespace: ${NAMESPACE}
+spec:
+  # Output
+  secretName: ${SERVICE}
+  duration: 8760h
+  renewBefore: 720h
+  subject:
+  commonName: ${ENDPOINT}
+  isCA: false
+  privateKey:
+    algorithm: RSA
+    encoding: PKCS1
+    size: 2048
+  usages:
+    - server auth
+  dnsNames:
+  - ${SERVICE}.${NAMESPACE}.svc
+  - ${SERVICE}.${NAMESPACE}.svc.cluster.local
+  ipAddresses:
+  - ${ENDPOINT}
+  issuerRef:
+    name: ca
+    kind: Issuer
+    group: cert-manager.io
+" | kubectl apply --filename=-
+
+# Creates Secret
+kubectl get secret ${SERVICE} \
+--namespace=${NAMESPACE}
+
+# Deploy Webhook
+cat ./kubernetes/deployment.yaml \
+| sed "s|SERVICE|${SERVICE}|g" \
+| sed "s|NAMESPACE|${NAMESPACE}|g" \
+| kubectl apply --filename=- --namespace=${NAMESPACE}
+
+# Configure Kubernetes to use Webhook
+CABUNDLE=$(\
+  kubectl get secret/${SERVICE} \
+  --namespace=${NAMESPACE} \
+  --output=jsonpath="{.data.ca\.crt}") && echo ${CABUNDLE}
+
+cat ./kubernetes/webhook.yaml \
+| sed "s|SERVICE|${SERVICE}|g" \
+| sed "s|NAMESPACE|${NAMESPACE}|g" \
+| sed "s|CABUNDLE|${CABUNDLE}|g" \
+| kubectl apply --filename=- --namespace=${NAMESPACE}
+```
+
+Verify:
+
+```bash
+kubectl get issuer \
+--namespace=${NAMESPACE} \
+--output=wide
+
+kubectl get certificate \
+--namespace=${NAMESPACE} \
+--output=wide
+
+kubectl get secret/${SERVICE} \
+--namespace=${NAMESPACE} \
+--output=jsonpath="{.data.tls\.crt}" \
+| base64 --decode \
+| openssl x509 -in - -noout -text
+```
+
 ### `v1beta1` Certificate
 
 ```bash
