@@ -115,7 +115,7 @@ FILENAME="${DIR}/${SERVICE}.${NAMESPACE}"
 > -x509 \
 > -keyout ${FILENAME}.ca.key \
 > -out ${FILENAME}.ca.crt \
-> "/CN=CA"
+> -subj "/CN=CA"
 >
 > # Create Secret
 > kubectl create secret tls ca \
