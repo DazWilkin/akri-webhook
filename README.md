@@ -139,17 +139,6 @@ FILENAME="${DIR}/${SERVICE}.${NAMESPACE}"
 > **NOTE** If you didn't create the CA in the previous step, you will need to adjust the `Issuer` to reflect your preferred issuer.
 
 ```bash
-# Deploy (Webhook) Service to capture its IP
-cat ./kubernetes/service.yaml \
-| sed "s|SERVICE|${SERVICE}|g" \
-| sed "s|NAMESPACE|${NAMESPACE}|g" \
-| kubectl apply --filename=- --namespace=${NAMESPACE}
-
-ENDPOINT=$(\
-  kubectl get service/${SERVICE} \
-  --namespace=${NAMESPACE} \
-  --output=jsonpath="{.spec.clusterIP}") && echo ${ENDPOINT}
-
 # Create Service Certificate using CA Issuer
 echo "
 apiVersion: cert-manager.io/v1
@@ -163,7 +152,6 @@ spec:
   duration: 8760h
   renewBefore: 720h
   subject:
-  commonName: ${ENDPOINT}
   isCA: false
   privateKey:
     algorithm: RSA
@@ -174,20 +162,24 @@ spec:
   dnsNames:
   - ${SERVICE}.${NAMESPACE}.svc
   - ${SERVICE}.${NAMESPACE}.svc.cluster.local
-  ipAddresses:
-  - ${ENDPOINT}
   issuerRef:
     name: ca
     kind: Issuer
     group: cert-manager.io
 " | kubectl apply --filename=-
 
-# Creates Secret
+# Previous step creates a Secret
 kubectl get secret ${SERVICE} \
 --namespace=${NAMESPACE}
 
-# Deploy Webhook
+# Webhook Deployment
 cat ./kubernetes/deployment.yaml \
+| sed "s|SERVICE|${SERVICE}|g" \
+| sed "s|NAMESPACE|${NAMESPACE}|g" \
+| kubectl apply --filename=- --namespace=${NAMESPACE}
+
+# Webhook Service
+cat ./kubernetes/service.yaml \
 | sed "s|SERVICE|${SERVICE}|g" \
 | sed "s|NAMESPACE|${NAMESPACE}|g" \
 | kubectl apply --filename=- --namespace=${NAMESPACE}
